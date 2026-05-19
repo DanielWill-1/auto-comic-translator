@@ -62,6 +62,34 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
+### About file
+
+See `_about.txt` for project background and notes. That file contains the original project motivation, scope, and attribution details used when this repository was created.
+
+### Backend API files
+
+This repo includes two API modules at the repository root that provide HTTP endpoints and helper runners:
+
+- `api.py`: a lightweight, easy-to-run API wrapper for the OCR → translate → render pipeline. Use this for quick local testing or as a simple script-backed HTTP service (run with `python api.py`).
+- `api_refined.py`: a refined ASGI-compatible implementation (improved caching, batching, and optional external API key support). Run it with Gunicorn/uvicorn: `uvicorn api_refined:app --reload`.
+
+Refer to the source in `api.py` and `api_refined.py` for exact endpoints and payload formats. The backend FastAPI app in `backend/main.py` remains the primary production entrypoint when running the full pipeline.
+
+### Run examples
+
+Quick local runs:
+
+```bash
+# simple script mode
+python api.py
+
+# ASGI refined mode
+uvicorn api_refined:app --reload
+
+# full backend (recommended for extension + processing)
+uvicorn backend.main:app --reload
+```
+
 ---
 
 ## ⚠️ Limitations
