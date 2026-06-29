@@ -1,120 +1,191 @@
 # Auto Comic Translator
 
-Auto Comic Translator is a browser extension that automatically translates webcomic/manhwa pages into English in near real-time.
+Automatic OCR and translation pipeline for webcomic, manga, and manhwa pages. Extracts Korean, Japanese, and Chinese text from comic images, translates it to English using local MarianMT models, and outputs structured results with bounding boxes.
 
-It is designed to allow users to read raw chapters directly from official sources without waiting for translations.
+The long-term goal is a browser extension that performs translation seamlessly while readers scroll through raw chapters on official sources. The current implementation covers the complete processing pipeline: image preprocessing, OCR extraction, translation, and structured output delivery.
 
----
+## Status
 
-## 🚀 Features
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Image preprocessing, OCR, structured text extraction | Complete |
+| Phase 2 | Local MarianMT translation, CLI tooling, API endpoints | Complete |
+| Phase 3 | Browser extension with DOM scanning and overlay rendering | Planned |
+| Phase 4 | Advanced typesetting, chapter-wide caching, faster inference | Planned |
 
-* Automatic image detection from web pages
-* OCR-based text extraction
-* Multi-language → English translation
-* Overlay translated text on comic panels
-* Local-first (completely free to use)
-* Optional API support for better translations
-* Caching for faster repeated reads
+## Architecture
 
----
+```
+Image Input (JPG/PNG)
+       |
+       v
+Image Preprocessing (grayscale, denoise, CLAHE, adaptive threshold)
+       |
+       v
+OCREngine (EasyOCR — 4 language groups: ko-en, ja-en, zh_sim-en, zh_tra-en)
+       |
+       v
+OCRResponse (text, confidence, bounding box per region)
+       |
+       v
+TranslationEngine (MarianMT — local pretrained models: ko->en, ja->en, zh->en)
+       |
+       v
+FullPipelineResult (original + translated text, bbox, timing per region)
+```
 
-## 🧠 How It Works
+### Backend modules
 
-1. Extension detects comic images on the page
-2. Images are sent to a processing pipeline
-3. OCR extracts text from the image
-4. Text is translated to English
-5. Translated text is rendered back onto the image
-6. Image is replaced dynamically in the browser
+| Module | Purpose |
+|--------|---------|
+| `backend/config.py` | Language mappings, model paths, preprocessing/translation/pipeline configs |
+| `backend/preprocessing.py` | `ImagePreprocessor` — grayscale, bilateral denoise, CLAHE, adaptive threshold |
+| `backend/ocr.py` | `OCREngine` — wraps EasyOCR with IoU-based deduplication across 4 language group readers |
+| `backend/pipeline.py` | `OCRPipeline` — preprocessing to OCR with vertical-proximity text grouping |
+| `backend/translate.py` | `TranslationEngine` + `MarianMTProvider` — loads local models from `./models/` |
+| `backend/full_pipeline.py` | `FullPipeline` — OCR to translation end-to-end, structured `FullPipelineResult` |
+| `backend/utils.py` | Image validation, bytes/ndarray conversion, result serialization |
+| `backend/main.py` | FastAPI app (v0.2.0) — `/health`, `/ocr`, `/translate`, `/ocr-batch` endpoints |
 
----
+### Pretrained models
 
-## ⚙️ Tech Stack
+Translation models are stored locally in `./models/` and excluded from version control:
 
-* Frontend: JavaScript (Chrome Extension)
-* Backend: Python (FastAPI)
-* OCR: EasyOCR / PaddleOCR
-* Translation: Local models or APIs
-* Image Processing: OpenCV / PIL
+| Directory | Language Pair | Model |
+|-----------|--------------|-------|
+| `models/marian-ko-en/` | Korean to English | Helsinki-NLP/opus-mt-ko-en |
+| `models/marian-ja-en/` | Japanese to English | Helsinki-NLP/opus-mt-ja-en |
+| `models/marian-zh-en/` | Chinese to English | Helsinki-NLP/opus-mt-zh-en |
 
----
+## Requirements
 
-## 💸 Cost Model
+- Python 3.11+
+- Virtual environment at `.venv/` with dependencies installed
+- Pretrained MarianMT models in `./models/`
 
-* Default: Fully free (local processing)
-* Optional: Users can add their own API keys for better translation quality
-
----
-
-## 📦 Installation (WIP)
-
-### Extension
-
-1. Clone the repo
-2. Open Chrome Extensions
-3. Enable Developer Mode
-4. Load `/extension` folder
-
-### Backend
+## Setup
 
 ```bash
+# Create and activate virtual environment
+python -m venv .venv
+.venv\Scripts\activate    # Windows
+source .venv/bin/activate  # macOS/Linux
+
+# Install dependencies
 pip install -r requirements.txt
-uvicorn main:app --reload
+
+# Download pretrained translation models (one-time)
+python testmt.py
 ```
 
-### About file
+## Usage
 
-See `_about.txt` for project background and notes. That file contains the original project motivation, scope, and attribution details used when this repository was created.
-
-### Backend API files
-
-This repo includes two API modules at the repository root that provide HTTP endpoints and helper runners:
-
-- `api.py`: a lightweight, easy-to-run API wrapper for the OCR → translate → render pipeline. Use this for quick local testing or as a simple script-backed HTTP service (run with `python api.py`).
-- `api_refined.py`: a refined ASGI-compatible implementation (improved caching, batching, and optional external API key support). Run it with Gunicorn/uvicorn: `uvicorn api_refined:app --reload`.
-
-Refer to the source in `api.py` and `api_refined.py` for exact endpoints and payload formats. The backend FastAPI app in `backend/main.py` remains the primary production entrypoint when running the full pipeline.
-
-### Run examples
-
-Quick local runs:
+### CLI
 
 ```bash
-# simple script mode
-python api.py
+# Basic: OCR + translate a comic image
+python cli.py panel.jpg -s ja
 
-# ASGI refined mode
-uvicorn api_refined:app --reload
+# Full options
+python cli.py panel.jpg -s ko -t en -j --no-group
 
-# full backend (recommended for extension + processing)
-uvicorn backend.main:app --reload
+# Arguments:
+#   image          Path to JPG/PNG comic image
+#   -s, --source   Source language (auto, ko, ja, zh, zh-Hans, zh-Hant)
+#   -t, --target   Target language (default: en)
+#   -j, --json     Output structured JSON instead of human-readable
+#   --no-group     Disable text proximity grouping
 ```
 
----
+Example output:
 
-## ⚠️ Limitations
+```
+==================================================
+OCR + Translation Results
+==================================================
+Source: ja, Target: en
+OCR: 15160ms | Translation: 12221ms
+Total: 27381ms | Regions: 3
+==================================================
 
-* Translation may not be perfect
-* Text placement may be rough
-* OCR accuracy depends on font/style
+[1] こ そ
+    -> That's it.
+    conf: 0.9500 | bbox: [[44, 80], [98, 80], [98, 104], [44, 104]]
 
----
+[2] ねば
+    -> It has to be.
+    conf: 0.2021 | bbox: [[44, 98], [102, 98], [102, 128], [44, 128]]
+```
 
-## 🌍 Roadmap
+### FastAPI server
 
-* Multi-language support (JP, CN, KR → EN)
-* Improved text placement
-* Better UI controls
-* Performance optimizations
+```bash
+# Start server
+uvicorn backend.main:app --reload
 
----
+# Endpoints:
+#   GET  /health           Server health check
+#   POST /ocr              Image preprocessing + OCR only
+#   POST /translate        Full pipeline: OCR + translation
+#   POST /ocr-batch        Batch OCR processing
+```
 
-## 🤝 Contributing
+`POST /translate` accepts multipart form data with fields `image` (file), `source_language` (string), `target_language` (string, default "en").
 
-This project is open source and contributions are welcome.
+Response format:
 
----
+```json
+{
+  "source_language": "ja",
+  "target_language": "en",
+  "ocr_time_ms": 15160.0,
+  "translation_time_ms": 12221.0,
+  "total_time_ms": 27381.0,
+  "num_regions": 3,
+  "regions": [
+    {
+      "original_text": "...",
+      "translated_text": "...",
+      "confidence": 0.95,
+      "bbox": [[44, 80], [98, 80], [98, 104], [44, 104]],
+      "translation_time_ms": 12324.5
+    }
+  ]
+}
+```
 
-## 📜 License
+## Tests
+
+```bash
+# Phase 1: OCR pipeline
+python tests/test_phase1.py
+
+# Phase 2: Full OCR + translation pipeline
+python tests/test_phase2.py
+
+# API integration test (requires server running)
+python tests/api_test.py
+```
+
+## Data
+
+Sample comic screenshots are stored in `datas/` organized by language:
+
+- `datas/japanes/` — Japanese comic panels
+- `datas/korean/` — Korean comic panels
+- `datas/chinese/` — Chinese comic panels
+
+These are used for testing and development. They are excluded from version control.
+
+## Next Steps (Phase 3)
+
+- DOM scanner for the Chrome extension to detect comic images on web pages
+- Automatic source language detection
+- Browser overlay rendering using OCR bounding boxes
+- Extension-to-backend communication via local HTTP
+- Progressive translation while scrolling
+- Backend-side result caching with SQLite
+
+## License
 
 MIT License

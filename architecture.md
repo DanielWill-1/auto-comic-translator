@@ -2,142 +2,293 @@
 
 ## 1. Overview
 
-**AutoComic Translator** is a browser extension that automatically translates webcomic and manhwa pages from source languages (Korean, Japanese, Chinese) into English in near real-time, integrating seamlessly into the reading experience.
+**AutoComic Translator** is a system designed to automatically translate webcomic, manga, and manhwa content from Korean, Japanese, and Chinese into English.
 
-### Problem Statement
-
-- Official sources release chapters faster in native languages
-- English translations lag behind by 100+ chapters
-- Existing solutions require manual interaction and break reading flow
-
-**User Need:** Read raw chapters instantly in readable English without interrupting the reading experience.
+The long-term vision is a browser extension that performs translation seamlessly while users read chapters online.
 
 ---
 
-## 2. Proposed Solution
+## 2. Problem Statement
+
+### Current Challenges
+
+- Official English releases often lag behind native-language releases.
+- Community translations can take days or weeks.
+- Existing OCR tools require manual screenshotting and copying text.
+- Translation workflows interrupt reading flow.
+
+### User Need
+
+Read raw comic chapters immediately in understandable English without manually extracting or translating text.
+
+---
+
+## 3. Product Vision
+
+### Final Product
 
 A browser extension that:
+
 - Detects comic images automatically
-- Extracts and translates text via OCR
-- Replaces or overlays translated content
-- Works seamlessly during scrolling and reading
-- Processes panels in 1-3 seconds
+- Extracts text using OCR
+- Translates text into English
+- Displays translated text directly on the page
+- Operates in near real-time while scrolling
+
+Target latency:
+
+- 1–3 seconds per panel
 
 ---
 
-## 3. Features
+## 4. Proof of Concept (MVP)
 
-### Core Features
-- ✓ Automatic page detection (zero user setup)
-- ✓ OCR-based text extraction
-- ✓ Multi-language to English translation
-- ✓ Dynamic image replacement/overlay
-- ✓ Near real-time processing (1-3 sec per panel)
+Before building the extension, a lightweight prototype will validate OCR and translation quality.
 
-### Advanced Features
-- ✓ Local-first processing (free, no API required)
-- ✓ Optional API mode (user-provided keys)
-- ✓ Smart caching (instant reloads)
-- ✓ Progressive rendering (panel-by-panel updates)
-- ✓ Background preloading (next chapter)
+### PoC Workflow
 
-### User Controls
-- Toggle translation ON/OFF
-- Select translation engine:
-  - Local (free, offline)
-  - DeepL (premium accuracy)
-  - Google Translate (general purpose)
-- Customize overlay style (font size, opacity, positioning)
-
----
-
-## 4. System Architecture
-
-### High-Level Flow
-
+```text
+User Uploads JPG/PNG
+            ↓
+       OCR Engine
+            ↓
+      Extracted Text
+            ↓
+   Translation Engine
+            ↓
+   English Translation
+            ↓
+Display Results Below Image
 ```
+
+### PoC Interface Options
+
+#### Option A — CLI
+
+```bash
+python translate.py panel.jpg
+```
+
+Output:
+
+```text
+Original:
+"안녕하세요"
+
+Translated:
+"Hello"
+```
+
+#### Option B — Web UI
+
+```text
+Upload Image
+      ↓
+OCR
+      ↓
+Translation
+      ↓
+Show translated text beneath image
+```
+
+The PoC focuses only on translation accuracy and speed.
+
+No browser automation is included at this stage.
+
+---
+
+## 5. Core Features
+
+### OCR
+
+- Korean support
+- Japanese support
+- Chinese support
+- Stylized comic text detection
+
+### Translation
+
+- Local translation models
+- Optional API-based translation
+- Multi-language support
+
+### Performance
+
+- Fast inference
+- Local caching
+- Progressive processing
+
+---
+
+## 6. System Architecture
+
+### PoC Architecture
+
+```text
+Frontend (CLI / Web UI)
+            ↓
+      Image Upload
+            ↓
+       OCR Engine
+      (EasyOCR /
+      PaddleOCR)
+            ↓
+      Text Output
+            ↓
+ Translation Engine
+            ↓
+ English Output
+            ↓
+      User Display
+```
+
+### Final Browser Extension Architecture
+
+```text
 Browser Extension
         ↓
-Image Capture (DOM)
+DOM Scanner
         ↓
-Processing Pipeline
-   ├── OCR (Text Detection)
-   ├── Translation Engine
-   └── Image Rendering
+Image Detection
         ↓
-DOM Replacement/Overlay
+OCR Pipeline
+        ↓
+Translation Engine
+        ↓
+Rendering Engine
+        ↓
+Overlay / Replacement
 ```
 
-### Components
-
-| Component | Responsibility |
-|-----------|-----------------|
-| **Browser Extension** | DOM parsing, image interception, UI controls |
-| **Processing Engine** | OCR, translation, image rendering |
-| **Storage Layer** | Local caching, optional shared cache |
-
 ---
 
-## 5. Technical Stack
+## 7. Technical Stack
 
 | Layer | Technology |
-|-------|------------|
-| **Extension** | JavaScript (Vanilla or React) |
-| **Backend** | Python (FastAPI) - optional |
-| **OCR** | EasyOCR / PaddleOCR |
-| **Translation** | Local models or APIs (DeepL, Google) |
-| **Image Processing** | OpenCV, PIL/Pillow |
-| **Caching** | IndexedDB / LocalStorage |
+|---------|-----------|
+| Frontend (PoC) | Streamlit / Gradio |
+| Browser Extension | JavaScript / React |
+| Backend | Python FastAPI |
+| OCR | PaddleOCR / EasyOCR |
+| Translation | NLLB / MarianMT / APIs |
+| Image Processing | OpenCV, Pillow |
+| Cache | IndexedDB / SQLite |
 
 ---
 
-## 6. Cost Model
+## 8. Translation Strategy
 
-### Default (Free)
-- Fully local processing
-- No external API usage
-- Zero developer costs
+### Local-First
 
-### Optional (User-Paid)
-- Premium API-based translation (user provides API keys)
-- Advanced features (custom caching, priority processing)
+Default mode uses locally hosted translation models.
 
----
+Examples:
 
-## 7. Development Roadmap
+- NLLB-200
+- MarianMT
+- M2M100
 
-### Phase 1: MVP
-- Image extraction and preprocessing
-- OCR + basic translation pipeline
-- Text overlay implementation
-- Basic caching system
+Advantages:
 
-### Phase 2: Enhancement
-- Improved layout handling and text positioning
-- Extended language support
-- UI/UX improvements
-- Performance optimization
+- Free
+- No API cost
+- Offline capable
+- Better privacy
 
-### Phase 3: Advanced (Optional)
-- Community caching network
-- AI-based typesetting
-- Advanced rendering techniques
+Disadvantages:
 
----
+- Larger model downloads
+- Slower on low-end devices
 
-## 8. Limitations & Considerations
+### API Mode
 
-- Translation quality depends on OCR and model accuracy
-- Text placement may be inconsistent with original layout
-- Stylized fonts can reduce OCR performance
-- Legal gray area: client-side transformation of copyrighted content
-- Performance varies based on device capabilities
+Optional support for:
+
+- DeepL
+- Google Translate
+- OpenAI
+
+Users provide their own API keys.
+
+No developer-side API expenses.
 
 ---
 
-## 9. Security & Privacy
+## 9. Cost Model
 
-- All processing performed locally by default
-- No user data sent to external servers (unless API mode enabled)
-- API keys stored securely in browser storage
-- Cache stored locally on user device
+### Developer Cost
+
+Target:
+
+```text
+$0/month
+```
+
+Using:
+
+- Local OCR
+- Local translation models
+- Client-side processing
+
+### User Cost
+
+Default:
+
+- Free
+
+Optional:
+
+- User-provided API keys
+
+---
+
+## 10. Development Roadmap
+
+### Phase 1 — Translation PoC
+
+- Image upload
+- OCR extraction
+- Translation
+- Text display
+
+### Phase 2 — Smart Comic Processing
+
+- Speech bubble detection
+- Better OCR preprocessing
+- Multi-panel support
+- Translation caching
+
+### Phase 3 — Browser Extension
+
+- DOM image detection
+- Automatic processing
+- Overlay rendering
+- Chapter-wide translation
+
+### Phase 4 — Advanced Features
+
+- AI typesetting
+- Community cache
+- Improved layout reconstruction
+- Faster inference
+
+---
+
+## 11. Risks & Limitations
+
+- Stylized fonts may reduce OCR accuracy.
+- OCR errors propagate into translations.
+- Layout reconstruction is difficult.
+- Translation quality varies by language.
+- Browser extension compatibility issues.
+- Legal considerations regarding copyrighted content.
+
+---
+
+## 12. Security & Privacy
+
+- Local processing by default.
+- No server-side storage.
+- No image uploads required.
+- User API keys stored locally.
+- Cached data remains on user device.
