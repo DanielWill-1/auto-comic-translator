@@ -11,7 +11,7 @@ from backend.full_pipeline import FullPipeline, full_pipeline_result_to_dict
 from backend.utils import bytes_to_ndarray, validate_image_bytes
 
 
-def test_image(path: Path, source_lang: str) -> bool:
+def run_image(path: Path, source_lang: str) -> bool:
     print(f"\n{'=' * 50}")
     print(f"Testing: {path.name}")
     print(f"Source lang: {source_lang}")
@@ -42,6 +42,6 @@ if __name__ == "__main__":
     ROOT = Path(__file__).resolve().parent.parent
     images = sorted(ROOT.glob("datas/japanes/*.png"), key=lambda p: p.stat().st_size, reverse=True)
     for img in images[:1]:
-        ok = test_image(img, source_lang="ja")
+        ok = run_image(img, source_lang="ja")
         print(f"\n{'=' * 50}")
         print(f"Result: {'PASS' if ok else 'FAIL'}")

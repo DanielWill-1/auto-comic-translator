@@ -3,7 +3,10 @@ import torch.nn as nn
 import torch.optim as optim
 import re
 import random
-import os
+from pathlib import Path
+
+# Dataset now lives in the same directory as this script.
+_DATASET_PATH = Path(__file__).resolve().parent / "fra.txt"
 
 # ==========================================
 # 1. DATASET PROCESSING (Local File)
@@ -38,11 +41,12 @@ def normalizeString(s):
     s = re.sub(r"[^a-zA-Z.!?]+", r" ", s)
     return s
 
-def prepareData(file_path='fra.txt'):
+def prepareData(file_path: str | None = None):
+    file_path = file_path or str(_DATASET_PATH)
     print(f"Reading local dataset from {file_path}...")
     
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Could not find {file_path}. Make sure it is in the same folder as this script!")
+    if not Path(file_path).exists():
+            raise FileNotFoundError(f"Could not find {file_path}. Make sure it is in the same folder as this script!")
 
     # Read the local file
     lines = open(file_path, encoding='utf-8').read().strip().split('\n')
@@ -142,7 +146,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    input_lang, output_lang, pairs = prepareData('fra.txt')
+    input_lang, output_lang, pairs = prepareData()
     print(f"Counted words: English={input_lang.n_words}, French={output_lang.n_words}")
 
     hidden_size = 256

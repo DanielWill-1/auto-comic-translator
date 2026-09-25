@@ -48,7 +48,7 @@ Rendering / Overlay Engine
 Translated Comic View
 ```
 
-The repository can expose multiple backend entrypoints. The full production-oriented backend should be handled by `backend/main.py`, while `api.py` can provide a lightweight local testing wrapper and `api_refined.py` can provide a more advanced ASGI-compatible API with caching, batching, and optional API key support.
+The repository can expose multiple backend entrypoints. The full production-oriented backend should be handled by `backend/main.py`. Experimental scripts (for example the Google-Translate text helpers under `experiments/translation/`) are intentionally kept separate and are **not** part of the production (local-first) pipeline.
 
 ## 4. Browser Extension Design
 

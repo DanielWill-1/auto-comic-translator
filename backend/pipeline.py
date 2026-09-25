@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
+
 import numpy as np
 from numpy.typing import NDArray
 
 from backend.config import PipelineConfig
 from backend.ocr import OCREngine, OCRResponse, OCRResult
 from backend.preprocessing import ImagePreprocessor
+
+
+@dataclass(frozen=True)
+class OCRStageTimings:
+    preprocessing_ms: float = 0.0
+    ocr_ms: float = 0.0
+    grouping_ms: float = 0.0
+    ocr_model_load_ms: float = 0.0
 
 
 class OCRPipeline:
@@ -31,9 +42,32 @@ class OCRPipeline:
         image: NDArray[np.uint8],
         source_language: str = "auto",
     ) -> OCRResponse:
-        response = self.run(image, source_language=source_language)
-        response.results = self._group_text_regions(response.results)
+        response, _ = self.run_with_grouping_timed(
+            image, source_language=source_language
+        )
         return response
+
+    def run_with_grouping_timed(
+        self,
+        image: NDArray[np.uint8],
+        source_language: str = "auto",
+    ) -> tuple[OCRResponse, OCRStageTimings]:
+        preprocessing_start = time.perf_counter()
+        preprocessed = self._preprocessor.enhance(image)
+        preprocessing_ms = (time.perf_counter() - preprocessing_start) * 1000
+
+        response = self._ocr.recognize(
+            preprocessed, source_language=source_language
+        )
+        grouping_start = time.perf_counter()
+        response.results = self._group_text_regions(response.results)
+        grouping_ms = (time.perf_counter() - grouping_start) * 1000
+        return response, OCRStageTimings(
+            preprocessing_ms=preprocessing_ms,
+            ocr_ms=response.ocr_engine_time_ms,
+            grouping_ms=grouping_ms,
+            ocr_model_load_ms=response.model_load_time_ms,
+        )
 
     def _group_text_regions(self, results: list[OCRResult]) -> list[OCRResult]:
         if len(results) < 2:
@@ -88,5 +122,27 @@ class OCRPipeline:
             text=merged_text,
             confidence=round(merged_conf, 4),
             bbox=merged_bbox,
-            language=group[0].language,
+            # Deterministic policy for a merged multi-line region: the
+            # confidence-weighted dominant language. Grouping keys off vertical
+            # proximity, so a merged region is expected to be one language;
+            # this picks the most confident detection if it is ever mixed.
+            language=self._dominant_language(group),
         )
+
+    @staticmethod
+    def _dominant_language(results: list[OCRResult]) -> str | None:
+        """Return the confidence-weighted dominant language of a region group.
+
+        Detections contributed by the same OCR reader already share a
+        ``language`` value, so weighting by confidence is a simple, stable way
+        to break ties without introducing another heuristic.
+        """
+        scores: dict[str, float] = {}
+        for r in results:
+            lang = r.language
+            if lang is None or lang == "auto":
+                continue
+            scores[lang] = scores.get(lang, 0.0) + r.confidence
+        if not scores:
+            return results[0].language if results else None
+        return max(scores, key=lambda k: (scores[k], k))

@@ -10,9 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from backend.config import PipelineConfig, SUPPORTED_LANGUAGES
+from backend.config import PipelineConfig
 from backend.full_pipeline import FullPipeline, full_pipeline_result_to_dict
-from backend.utils import bytes_to_ndarray, validate_image_bytes
+from backend.utils import decode_image_bytes
 
 
 def main() -> int:
@@ -26,8 +26,8 @@ def main() -> int:
         help="Source language (default: auto).",
     )
     parser.add_argument(
-        "-t", "--target", default="en",
-        help="Target language code (default: en).",
+        "-t", "--target", default="en", choices=["en"],
+        help="Target language code (currently only en is supported).",
     )
     parser.add_argument(
         "-j", "--json", action="store_true",
@@ -46,25 +46,35 @@ def main() -> int:
 
     data = image_path.read_bytes()
     try:
-        validate_image_bytes(data)
+        nd = decode_image_bytes(data)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    nd = bytes_to_ndarray(data)
-
     config = PipelineConfig(use_gpu=False)
     pipeline = FullPipeline(config)
 
-    print(f"Processing: {image_path.name} ({nd.shape[1]}x{nd.shape[0]})", file=sys.stderr)
+    print(
+        f"Processing: {image_path.name} ({nd.shape[1]}x{nd.shape[0]})",
+        file=sys.stderr,
+    )
 
-    source_lang = args.source if args.source != "auto" else _detect_lang_hint(image_path)
-    print(f"Source: {source_lang}, Target: {args.target}", file=sys.stderr)
+    # Pass the user's source_language straight to the pipeline. When it is
+    # "auto" the OCR layer runs all language readers and each detected region
+    # carries its own resolved language; the filename is only used as an
+    # informational hint below, never as the authoritative translation language.
+    source_lang = args.source
+    print(f"Source: {source_lang} (filename hint: {_detect_lang_hint(image_path)}), "
+          f"Target: {args.target}", file=sys.stderr)
 
     result = pipeline.run(nd, source_language=source_lang, target_language=args.target)
 
     if args.json:
-        print(json.dumps(full_pipeline_result_to_dict(result), ensure_ascii=False, indent=2))
+        print(json.dumps(
+            full_pipeline_result_to_dict(result, legacy_bbox=True),
+            ensure_ascii=False,
+            indent=2,
+        ))
     else:
         _print_human(result)
 
@@ -87,7 +97,10 @@ def _print_human(result) -> None:
     print("OCR + Translation Results")
     print(f"{'=' * 50}")
     print(f"Source: {result.source_language}, Target: {result.target_language}")
-    print(f"OCR: {result.ocr_time_ms:.0f}ms | Translation: {result.translation_time_ms:.0f}ms")
+    print(
+        f"OCR: {result.ocr_time_ms:.0f}ms | "
+        f"Translation: {result.translation_time_ms:.0f}ms"
+    )
     print(f"Total: {result.total_time_ms:.0f}ms | Regions: {result.num_regions}")
     print(f"{'=' * 50}")
 

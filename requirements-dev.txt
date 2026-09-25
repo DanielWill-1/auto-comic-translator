@@ -1,0 +1,28 @@
+# ==========================
+# Development / test-only dependencies for the Auto Comic Translator.
+#
+# These are NOT required to run the production backend. They are used only
+# by tests, experiments, and development workflows.
+#
+# Install with:  pip install -r requirements-dev.txt
+# ==========================
+
+# Test / API integration test
+requests==2.32.3
+pytest
+httpx>=0.24,<1.0
+
+# OCR alternatives and utilities kept for experiments / evaluation.
+# Not imported by the production pipeline.
+easyocr==1.7.2
+
+# Optional torch component. Not imported by production code.
+torchvision==0.20.1
+
+# Progress bar utility, used only in development scripts.
+tqdm==4.67.1
+
+# Paid / non-local translation experiments (experiments/translation/).
+# NOTE: deep_translator talks to the Google Translate endpoint and is
+# intentionally NOT part of the production (local-first) pipeline.
+deep-translator

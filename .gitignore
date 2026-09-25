@@ -10,9 +10,21 @@ build/
 
 models/
 
+# Local cache / generated data (Phase 2.5 SQLite cache, downloaded datasets)
+data/
+
+# Test / tooling caches
+.pytest_cache/
 *.log
 *.tmp
 *.cache
+
+# Environment / secrets
 .env
 
+# IDE / local config
+.idea/
+.vscode/
+
+# Local tooling scratch (preserved from original repo)
 .commandcode/taste/taste.md

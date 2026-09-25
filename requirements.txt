@@ -1,9 +1,9 @@
 # ==========================
-# Core AI
+# Core runtime dependencies for the Auto Comic Translator backend.
 # ==========================
-torch==2.5.1
-torchvision==0.20.1
 
+# Deep learning / transformers
+torch==2.5.1
 transformers==4.46.3
 accelerate==1.1.1
 huggingface_hub==0.26.2
@@ -11,30 +11,19 @@ tokenizers==0.20.3
 sentencepiece==0.2.0
 safetensors==0.4.5
 
-# ==========================
-# OCR
-# ==========================
+# OCR (production uses PaddleOCR)
 paddleocr==2.9.1
 paddlepaddle==3.0.0
 
-easyocr==1.7.2
-
-# ==========================
-# Image Processing
-# ==========================
+# Image processing
 opencv-python==4.10.0.84
 Pillow==11.0.0
 numpy==1.26.4
 
-# ==========================
-# Backend
-# ==========================
+# Backend / API
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 python-multipart==0.0.17
 
-# ==========================
-# Utilities
-# ==========================
-tqdm==4.67.1
+# Utils
 requests==2.32.3
