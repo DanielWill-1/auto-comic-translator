@@ -58,19 +58,42 @@ def _local_reader_models(language_keys: list[str]) -> list[str]:
         _PADDLE_MODEL_FILES,
         _paddle_model_directories,
     )
-    from paddleocr import paddleocr as paddleocr_module
+    import paddleocr
+
+    try:
+        major_version = int(paddleocr.__version__.split(".", maxsplit=1)[0])
+    except (AttributeError, TypeError, ValueError):
+        major_version = 2
 
     missing = []
     for language_key in language_keys:
         paddle_language = _PADDLE_LANG_MAP[language_key]
-        model_directories = _paddle_model_directories(
-            paddleocr_module, paddle_language
-        )
-        if not all(
-            all((directory / filename).is_file() for filename in _PADDLE_MODEL_FILES)
-            for directory in model_directories
-        ):
-            missing.append(language_key)
+        if major_version >= 3:
+            from backend.ocr import (
+                _paddlex_model_directories,
+                _require_local_paddlex_model,
+            )
+
+            model_specs = _paddlex_model_directories(paddle_language)
+            try:
+                for model_name, model_directory in model_specs:
+                    _require_local_paddlex_model(model_name, model_directory)
+            except FileNotFoundError:
+                missing.append(language_key)
+        else:
+            from paddleocr import paddleocr as paddleocr_module
+
+            model_directories = _paddle_model_directories(
+                paddleocr_module, paddle_language
+            )
+            if not all(
+                all(
+                    (directory / filename).is_file()
+                    for filename in _PADDLE_MODEL_FILES
+                )
+                for directory in model_directories
+            ):
+                missing.append(language_key)
     return missing
 
 

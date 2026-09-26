@@ -8,7 +8,11 @@ from types import ModuleType
 
 import pytest
 
-from backend.ocr import OCREngine, _paddle_model_directories
+from backend.ocr import (
+    OCREngine,
+    _paddle_model_directories,
+    _paddlex_model_directories,
+)
 
 
 def install_fake_paddleocr(monkeypatch, tmp_path, *, install_model_files):
@@ -81,3 +85,63 @@ def test_local_paddle_models_load_with_configured_device_and_quiet_logs(
     assert reader_options == [("japan", False, False)]
     assert downloads == []
     assert module.maybe_download is original
+
+
+def install_fake_paddleocr3(monkeypatch, tmp_path, *, install_model_files):
+    reader_options = []
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs):
+            reader_options.append(kwargs)
+
+    paddle_package = ModuleType("paddleocr")
+    paddle_package.__version__ = "3.7.0"
+    paddle_package.PaddleOCR = FakePaddleOCR
+    monkeypatch.setitem(sys.modules, "paddleocr", paddle_package)
+    monkeypatch.setenv("PADDLE_PDX_CACHE_HOME", str(tmp_path))
+
+    model_specs = _paddlex_model_directories("japan", tmp_path)
+    if install_model_files:
+        for _, directory in model_specs:
+            directory.mkdir(parents=True, exist_ok=True)
+            for filename in ("inference.yml", "inference.json", "inference.pdiparams"):
+                (directory / filename).write_bytes(b"local model")
+    return model_specs, reader_options
+
+
+def test_paddleocr3_requires_both_local_paddlex_models_before_initializing(
+    monkeypatch, tmp_path
+):
+    model_specs, reader_options = install_fake_paddleocr3(
+        monkeypatch, tmp_path, install_model_files=False
+    )
+
+    with pytest.raises(
+        FileNotFoundError,
+        match="PP-OCRv6_medium_det.*Model downloads are disabled",
+    ):
+        OCREngine(use_gpu=False)._get_reader("ja")
+
+    assert model_specs[0][1].is_dir() is False
+    assert reader_options == []
+
+
+def test_paddleocr3_initializes_with_explicit_local_model_directories(
+    monkeypatch, tmp_path
+):
+    model_specs, reader_options = install_fake_paddleocr3(
+        monkeypatch, tmp_path, install_model_files=True
+    )
+
+    reader = OCREngine(use_gpu=False)._get_reader("ja")
+
+    assert len(reader_options) == 1
+    options = reader_options[0]
+    assert options["text_detection_model_name"] == model_specs[0][0]
+    assert options["text_detection_model_dir"] == str(model_specs[0][1])
+    assert options["text_recognition_model_name"] == model_specs[1][0]
+    assert options["text_recognition_model_dir"] == str(model_specs[1][1])
+    assert options["device"] == "cpu"
+    assert options["use_doc_orientation_classify"] is False
+    assert options["use_doc_unwarping"] is False
+    assert options["use_textline_orientation"] is False

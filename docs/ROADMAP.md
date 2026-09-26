@@ -1,6 +1,6 @@
 # Auto Comic Translator — ROADMAP
 
-This roadmap tracks backend hardening and the later browser extension. The
+This roadmap tracks backend hardening and browser extension development. The
 project remains local-first and open source; paid translation APIs and hosted
 inference are out of scope.
 
@@ -8,7 +8,7 @@ Status legend: `[x] done` · `[ ] planned` · `[~] in progress`
 
 ---
 
-## Current state (Phases 1–2 — complete)
+## Current state (Phases 1–2.5 — complete)
 
 - Image preprocessing and PaddleOCR extraction.
 - OCR deduplication and proximity-based text grouping.
@@ -17,9 +17,8 @@ Status legend: `[x] done` · `[ ] planned` · `[~] in progress`
 
 ## Phase 2.5 — Backend hardening for extension clients
 
-Overall phase status: **in progress**. Milestones 2.5.1 through 2.5.4 are
-complete; milestone 2.5.5 is in progress while required Korean and
-Traditional Chinese OCR assets are unavailable.
+Overall phase status: **complete**. Known Korean and full auto-mode OCR asset
+gaps remain documented; they do not block Phase 3 development.
 
 ### Milestone 2.5.1 — Stable translation API and OCR language propagation [x]
 
@@ -98,7 +97,7 @@ Traditional Chinese OCR assets are unavailable.
 - Add no-inference timing and benchmark safety/privacy tests in
   `tests/test_timing.py` and `tests/test_benchmark.py`.
 
-### Milestone 2.5.5 — Real-model integration and final backend hardening [~]
+### Milestone 2.5.5 — Real-model integration and final backend hardening [x]
 
 - Add opt-in real-model translation, image pipeline, and loopback HTTP checks;
   the normal test suite skips integration tests and never loads large models.
@@ -113,22 +112,7 @@ Traditional Chinese OCR assets are unavailable.
   files are missing. Auto-mode image checks also need the missing Korean and
   Traditional Chinese OCR assets. No model files are downloaded by tests.
 
-## Phase 3 — Browser extension (separate from Phase 2.5)
-
-The extension will call the local backend and map returned original-image
-coordinates onto displayed images. Planned work includes:
-
-1. Minimal Chromium Manifest V3 structure and popup settings.
-2. Comic image discovery, including dynamically inserted images.
-3. Viewport-aware requests with bounded concurrency.
-4. Coordinate remapping on image resize and page layout changes.
-5. Overlay and optional translation-feed display modes.
-6. Session caching and failure handling for offline backends or missing text.
-
-No browser-extension behavior is included in the completed Phase 2.5
-milestones.
-
-### Phase 3 backend readiness checklist
+### Phase 2.5 validation record
 
 - [x] Local loopback server starts; verified by the live HTTP integration test.
 - [x] `/health` responds without loading models.
@@ -156,10 +140,40 @@ milestones.
 - [x] Full lightweight test suite: 75 passed, 15 opt-in integration cases
   skipped in the default run.
 
-Phase 3 backend readiness remains **blocked by local Korean and Traditional
-Chinese OCR assets**. Korean image, Korean HTTP/cache, and auto-mode image
-checks could not run under the no-download rule. The extension milestone
-should wait for those prerequisites.
+Korean image OCR and complete auto-language image validation remain unverified
+because local Korean and Traditional Chinese OCR assets are unavailable. These
+are tracked validation gaps, not blockers for Phase 3.1.
+
+## Phase 3 — Chromium extension
+
+The extension will connect to the local backend, discover comic images, and
+eventually show translated text. Work is split into these milestones:
+
+1. **3.1 Extension skeleton and backend connection** [x] — Manifest V3 popup,
+   local settings, and a version-checked `/health` request.
+2. **3.2 Comic image discovery** [x] — identify candidate comic images on a
+   page without sending them to the backend yet; manual Chromium verification
+   passed.
+3. **3.3 First image-to-backend integration** [~] — explicitly send one
+   selected image to the existing API v1 and handle its translated regions.
+4. **3.4 Lazy translation queue** [ ] — queue images near the viewport with
+   `IntersectionObserver` and bounded work.
+5. **3.5 Overlay renderer** [ ] — place translated regions over their source
+   image using the original-image coordinate contract.
+6. **3.6 Translation feed** [ ] — provide a scrollable original-and-translation
+   view in reading order.
+7. **3.7 Reliability and polish** [ ] — improve failure handling, settings,
+   accessibility, and browser compatibility.
+
+Milestones 3.1 and 3.2 are implemented and manually verified. Phase 3.3 adds
+an Alt+Click development trigger, a bounded `/translate` request, and a
+temporary result card. Its small service worker submits the fixed loopback
+request with the extension origin accepted by the existing backend CORS
+policy. It does not implement automatic requests or final overlays. The
+backend API v1 remains frozen for Phase 3 unless integration work exposes a
+genuine compatibility defect.
+
+Phase status: **3.3 IMPLEMENTED — MANUAL VERIFICATION PENDING**.
 
 ## Privacy and out of scope
 

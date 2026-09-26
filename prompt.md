@@ -1,515 +1,212 @@
-We are finishing the remaining verification work for Phase 2.5.5 of
-AUTO-COMIC-TRANSLATOR.
+We are blocked in Phase 3.3 by a real PaddleOCR compatibility issue.
 
-DO NOT add new features.
+Current environment:
 
-Japanese real-model verification has already passed.
+Global Python:
+C:\Users\danie\AppData\Local\Programs\Python\Python311\python.exe
 
-Current verified state:
+Installed and importable:
+paddle 3.3.1
+paddleocr 3.7.0
+paddlex 3.7.2
+torch 2.5.1+cu121
 
-- Japanese 436x654 comic image passed real OCR + translation.
-- Japanese real HTTP /translate passed.
-- Japanese real cache miss -> hit passed.
-- Japanese returned two translated regions with translation_status="ok".
-- Japanese measured:
-    first request: 12,751.77 ms
-    warm repeat:    1,584.73 ms
-    cache hit:         49.34 ms
-- Japanese, Korean, and Chinese local Marian translation models have
-  independently loaded and produced nonempty translations.
-- Korean and Chinese IMAGE OCR/integration verification remained missing.
-- Default suite previously passed:
-    75 passed, 10 skipped
-- Integration suite previously:
-    5 passed, 5 skipped
-- No model downloads are permitted.
-- No paid/cloud services are permitted.
+The project .venv currently hangs while importing torch on Windows, so
+for now the working runtime is global Python.
 
-I have now added representative Korean and Chinese comic images under
-the project's datas/ directory.
+Backend startup currently succeeds with global Python, but warmup reports:
 
-The ONLY objective of this task is to finish Korean and Chinese
-real-image verification and determine whether Phase 2.5.5 can be marked
-complete.
+"Pipeline warmup incomplete: Cannot verify that PaddleOCR model downloads are disabled."
+
+This blocks real OCR initialization.
+
+DO NOT downgrade or reinstall packages yet.
+
+DO NOT modify the extension.
+
+DO NOT begin Phase 3.4.
+
+The task is to diagnose and fix ONLY the local PaddleOCR model-download
+protection check so the backend can safely initialize OCR using already
+present local assets.
 
 ============================================================
-DO NOT DEVELOP NEW FEATURES
+GOAL
 ============================================================
 
-Do not:
+Make the backend correctly verify that PaddleOCR/PaddleX will NOT
+download models at request time, for the actually installed versions:
 
-- redesign OCR
-- replace PaddleOCR
-- replace MarianMT
-- change translation models
-- optimize performance
-- implement the extension
-- change API v1
-- add cloud APIs
-- download models
-- download OCR assets
-- add telemetry
-- change cache architecture
+paddleocr 3.7.0
+paddlex 3.7.2
 
-Fix code ONLY if real testing exposes a genuine correctness or
-integration bug.
+Then allow warmup to proceed if local OCR assets are already available.
+
+No network download must occur.
 
 ============================================================
-1. DISCOVER THE NEW SAMPLES
+FIRST — INSPECT
 ============================================================
 
 Inspect:
 
-datas/korean/
-datas/chinese/
+backend/ocr.py
+backend/main.py
+backend/config.py
 
-and the existing:
+Search for:
 
-datas/japanes/
+PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK
+model download checks
+environment-variable guards
+PaddleOCR constructor logic
+PaddleX model-source logic
 
-Do not assume exact filenames.
+Also inspect current PaddleOCR/PaddleX installed APIs from the actual
+runtime.
 
-List which representative files will be tested.
+Use small introspection commands where useful, for example:
 
-Prefer 2-5 images per newly available language if enough exist.
+python -c "import paddleocr, inspect; ..."
+python -c "import paddlex, inspect; ..."
 
-Do not test hundreds of files.
-
-Choose representative samples based on:
-
-- readable resolution
-- actual comic text
-- variation where available
-
-Do not modify the source images.
-
-============================================================
-2. VERIFY LOCAL ASSETS FIRST
-============================================================
-
-Before inference, verify all required LOCAL assets exist.
-
-For Korean:
-
-- PaddleOCR Korean OCR assets
-- local Korean -> English translation model
-
-For Chinese:
-
-- required PaddleOCR Chinese OCR assets
-- local Chinese -> English translation model
-
-NO DOWNLOADS.
-
-The application has already been hardened to refuse missing model
-downloads.
-
-If an OCR asset is missing, report exactly which LOCAL prerequisite is
-missing and stop that language's test rather than downloading it.
+Do not guess API behavior from older versions.
 
 ============================================================
-3. KOREAN — EXPLICIT REAL PIPELINE
+IMPORTANT
 ============================================================
 
-Run real image inference with:
+The project previously hardened OCR so missing local assets do NOT cause
+automatic downloads.
 
-source_language=ko
-target_language=en
+Preserve that guarantee.
 
-For each selected Korean sample verify:
+Do NOT fix startup by simply deleting the safety check.
 
-image
-  -> preprocessing
-  -> REAL PaddleOCR
-  -> grouping
-  -> REAL local Marian translation
-  -> serialized API result
+Do NOT set a flag blindly unless the installed library actually honors
+it.
 
-Check:
-
-- no crash
-- regions detected when visible text exists
-- original_text is nonempty for detected regions
-- translated_text is nonempty
-- translation_status is truthful
-- expected source language is preserved
-- bbox is valid
-- bbox is inside original image dimensions
-- bbox_points are valid
-- OCR confidence is valid
-- Unicode survives correctly
-
-Show a SHORT human-readable sample of detected text and translation.
-
-Do not require exact translation wording.
+We need a version-correct verification mechanism.
 
 ============================================================
-4. KOREAN — AUTO MODE
+WHAT TO DETERMINE
 ============================================================
 
-Run the same representative Korean image with:
+Find out:
 
-source_language=auto
+1. Whether PaddleOCR 3.7.0 still uses
+   PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK
 
-Inspect:
+2. Whether PaddleX 3.7.2 uses a different environment variable or model
+   source configuration mechanism
 
-- top-level resolved language
-- region-level languages
-- number of regions
-- translation model routing
-- translation statuses
-- OCR timing
-- translation timing
-- total timing
+3. Whether local model directories can be supplied explicitly to avoid
+   remote model resolution entirely
 
-Compare against explicit ko.
+4. Whether PaddleOCR constructor arguments changed in 3.x
 
-The purpose is to catch catastrophic language-routing problems.
-
-Do not demand every individual region be perfectly classified.
+5. Whether the backend's current verification logic was written for an
+   older PaddleOCR/PaddleX release
 
 ============================================================
-5. CHINESE — EXPLICIT REAL PIPELINE
+LOCAL-ONLY REQUIREMENT
 ============================================================
 
-Determine whether the supplied samples are:
+The final OCR initialization must behave like this:
 
-- simplified Chinese
-- traditional Chinese
-- mixed/unknown
+local OCR assets exist
+    -> initialize from local files
 
-Use the appropriate existing source-language option.
+local OCR assets missing
+    -> fail clearly
 
-Run real image inference.
+local OCR assets missing
+    -> DO NOT download anything
 
-Verify the same contract as Korean:
-
-- real OCR
-- real local translation
-- valid regions
-- valid bbox
-- valid bbox_points
-- valid confidence
-- correct model routing
-- nonempty translation
-- truthful translation_status
-- Unicode correctness
-
-Remember:
-
-zh / zh-Hans / zh-Hant may normalize internally to the local zh-en
-translation model.
-
-Preserve the detected/requested language information in the API as
-currently designed.
+No silent network fallback.
 
 ============================================================
-6. CHINESE — AUTO MODE
+PREFERRED FIX
 ============================================================
 
-Run a representative Chinese image with:
+Prefer explicit local model paths over heuristic environment checking if
+PaddleOCR 3.7.0 supports that reliably.
 
-source_language=auto
+If explicit local paths are enough to guarantee no download, document
+and use that.
 
-Inspect:
+If PaddleX still requires a disable-download/source-check environment
+variable, set and verify the correct one before importing/initializing.
 
-- resolved source language
-- region languages
-- number of regions
-- translation routing
-- translation status
-- OCR timing
-- translation timing
-- total timing
-
-Compare explicit vs auto.
-
-Again:
-
-DO NOT optimize auto mode during this task.
-
-Measure and report it.
+Avoid brittle introspection if the installed package exposes a cleaner
+supported mechanism.
 
 ============================================================
-7. HUMAN SANITY CHECK
+VERSION COMPATIBILITY
 ============================================================
 
-For each language show a few SHORT examples:
+The fix should ideally support the currently installed versions first.
 
-Korean:
+Do not generalize across every historical PaddleOCR version unless it is
+simple.
 
-Original:
-...
+If needed, detect behavior/version explicitly.
 
-Translation:
-...
-
-Chinese:
-
-Original:
-...
-
-Translation:
-...
-
-We are looking for catastrophic failures, NOT perfect literary
-translation.
-
-Flag things like:
-
-- OCR garbage
-- untranslated output
-- obvious wrong-model routing
-- duplicate regions
-- missing text
-- encoding corruption
-
-Distinguish:
-
-OCR problem
-
-from:
-
-translation problem
-
-where possible.
+But avoid a giant compatibility matrix.
 
 ============================================================
-8. REAL HTTP TEST
+DO NOT TOUCH
 ============================================================
 
-After direct pipeline verification succeeds, start the real local
-FastAPI server.
+Do not modify:
 
-Use at least:
+extension/
+docs unrelated to this issue
+cache logic
+translation logic
+API contract
+Phase 3 behavior
 
-one Korean image
-one Chinese image
-
-Send actual multipart HTTP requests to:
-
-POST /translate
-
-Verify:
-
-HTTP 200
-api_version == "1"
-correct image dimensions
-regions serialize correctly
-bbox contract survives HTTP
-request ID exists
-timing exists
-translation_status exists
-no traceback/path leakage
-
-Do not rely only on Python function calls.
+Unless a minimal docs note is needed after the fix.
 
 ============================================================
-9. REAL CACHE TEST
+TEST
 ============================================================
 
-For one Korean and one Chinese sample:
+After the fix, run:
 
-FIRST REQUEST
-    cache miss
-    real inference occurs
+python -m backend.main
 
-SECOND IDENTICAL REQUEST
-    cache hit
-    inference is bypassed
+Expected:
+- no "Cannot verify that PaddleOCR model downloads are disabled"
+- warmup attempts real local OCR initialization
+- if a local OCR asset is missing, error names that missing asset instead
+  of attempting download
 
-Verify:
+Also run a direct import/initialization check.
 
-cache.hit == true
-ocr timing == 0
-translation timing == 0
-bbox preserved
-bbox_points preserved
-text preserved
-language preserved
-translation_status preserved
-
-Use a temporary cache.
-
-Do NOT modify or clear the user's normal cache.
-
-============================================================
-10. PERFORMANCE
-============================================================
-
-Use the existing instrumentation.
-
-Record real measurements for Korean and Chinese.
-
-At minimum report:
-
-resolution
-explicit/auto
-preprocessing_ms
-ocr_ms
-translation_ms
-request_total_ms
-
-Where practical also record:
-
-first request
-warm request
-cache hit
-
-DO NOT optimize anything based on these results yet.
-
-Update docs/PERFORMANCE.md with REAL numbers only.
-
-Clearly identify:
-
-CPU/GPU mode
-explicit vs auto
-
-Do not include personal absolute filesystem paths.
-
-============================================================
-11. INTEGRATION TESTS
-============================================================
-
-Use or extend the existing opt-in integration tests.
-
-Do NOT make normal pytest unexpectedly load real models.
-
-Integration tests should remain explicitly opt-in.
-
-Run the Korean and Chinese integration cases.
-
-Then run the entire lightweight suite again.
-
-Expected commands should remain conceptually:
+Then run:
 
 pytest
-
-and separately:
-
-pytest -m integration
-
-or the project's established equivalent.
-
-============================================================
-12. FAILURE POLICY
-============================================================
-
-If Korean or Chinese fails, diagnose the layer.
-
-Classify failure as one of:
-
-ENVIRONMENT
-OCR MODEL/ASSET
-PREPROCESSING
-OCR
-GROUPING
-LANGUAGE ROUTING
-TRANSLATION
-SERIALIZATION
-CACHE
-HTTP
-
-Do not start rewriting unrelated components.
-
-If it is a straightforward implementation bug, fix it and rerun the
-affected tests.
-
-If it is fundamentally model-quality related, document it instead of
-redesigning the system.
-
-============================================================
-13. PHASE 2.5 COMPLETION CRITERIA
-============================================================
-
-Phase 2.5.5 can be marked complete when we have demonstrated:
-
-Japanese:
-[x] real image OCR
-[x] real local translation
-[x] HTTP
-[x] cache
-
-Korean:
-[ ] real image OCR
-[ ] real local translation
-[ ] explicit mode
-[ ] auto mode
-[ ] HTTP
-[ ] cache
-
-Chinese:
-[ ] real image OCR
-[ ] real local translation
-[ ] explicit mode
-[ ] auto mode
-[ ] HTTP
-[ ] cache
-
-Global:
-[x/verify] API v1
-[x/verify] bbox contract
-[x/verify] local-only operation
-[x/verify] no request-time model downloads
-[x/verify] lightweight test suite
-[x/verify] extension CORS policy
-
-Only mark boxes complete when actually verified.
-
-============================================================
-14. FINAL VALIDATION
-============================================================
-
-After real testing run:
-
-pytest
-
-appropriate opt-in integration tests
 
 python -m compileall backend scripts
 
-python cli.py --help
-
-python scripts/benchmark.py --help
-
-Verify:
-
-from backend.main import app
-
-Run:
-
 git diff --check
 
-Confirm:
-
-- no models downloaded
-- no paid APIs introduced
-- no telemetry introduced
-- API v1 unchanged
-- normal cache untouched
-- no accidental file deletion
-
 ============================================================
-15. DOCUMENTATION
+NETWORK SAFETY CHECK
 ============================================================
 
-Update only where warranted:
+Do not download anything during testing.
 
-docs/PERFORMANCE.md
-docs/ROADMAP.md
-docs/API.md if an actual discrepancy was discovered
+If practical, temporarily disable network access or otherwise verify no
+remote fetch occurs.
 
-Do not rewrite documentation unnecessarily.
-
-If all completion criteria pass:
-
-mark Phase 2.5.5 complete.
-
-Then mark:
-
-PHASE 2.5 COMPLETE
-
-Do NOT begin Phase 3.
+At minimum inspect logs carefully for:
+- model downloads
+- huggingface fetches
+- Paddle model source fetches
+- remote URLs
 
 ============================================================
 FINAL REPORT
@@ -517,42 +214,24 @@ FINAL REPORT
 
 Return:
 
-### Korean
-Samples tested
-Explicit result
-Auto result
-Short OCR -> translation examples
-Performance
-HTTP result
-Cache result
+### Root cause
+Exactly why the old verification failed with PaddleOCR 3.7.0 /
+PaddleX 3.7.2.
 
-### Chinese
-Samples tested
-Explicit result
-Auto result
-Short OCR -> translation examples
-Performance
-HTTP result
-Cache result
+### Fix
+Exact file(s) changed and how local-only behavior is now enforced.
 
-### Japanese
-Confirm previous verified status remains valid.
+### Local asset behavior
+What happens when assets exist vs are missing.
 
-### Bugs found
-Only actual integration bugs.
+### Validation
+Exact commands/results.
 
-### Automated tests
-Exact pass/skip/fail counts.
+### Downloads
+Explicitly confirm whether anything was downloaded.
 
-### Model downloads
-Explicitly confirm whether ANYTHING was downloaded.
+### Backend startup
+Show whether warmup now succeeds or what specific local asset remains
+missing.
 
-### Phase 2.5 verdict
-
-If every required check passed, say exactly:
-
-"Backend Phase 2.5 is complete and ready for Phase 3."
-
-Otherwise list ONLY the remaining blockers.
-
-DO NOT START PHASE 3.
+Do NOT continue Phase 3.3 automatically.

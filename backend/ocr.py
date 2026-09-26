@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,9 +14,6 @@ from numpy.typing import NDArray
 
 from backend.config import OCR_CONFIDENCE_THRESHOLD
 
-os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
-
-import logging
 logging.getLogger("ppocr").setLevel(logging.WARNING)
 
 
@@ -47,10 +46,18 @@ _PADDLE_LANG_MAP: dict[str, str] = {
 }
 _PADDLE_READER_INIT_LOCK = threading.Lock()
 _PADDLE_MODEL_FILES = ("inference.pdmodel", "inference.pdiparams")
+_PADDLEX_MODEL_FILES = ("inference.yml", "inference.pdiparams")
+_PADDLEX_MODEL_PROGRAM_FILES = ("inference.json", "inference.pdmodel")
+_PADDLEOCR3_MODEL_NAMES: dict[str, tuple[str, str]] = {
+    "korean": ("PP-OCRv5_server_det", "korean_PP-OCRv5_mobile_rec"),
+    "japan": ("PP-OCRv6_medium_det", "PP-OCRv6_medium_rec"),
+    "ch": ("PP-OCRv6_medium_det", "PP-OCRv6_medium_rec"),
+    "chinese_cht": ("PP-OCRv6_medium_det", "PP-OCRv6_medium_rec"),
+}
 
 
 def _paddle_model_directories(paddleocr_module: Any, language: str) -> list[Path]:
-    """Resolve PaddleOCR 2.x's local model directories without initializing it."""
+    """Resolve PaddleOCR 2.x local models without initializing the reader."""
     try:
         model_language, detection_language = paddleocr_module.parse_lang(language)
         model_version = paddleocr_module.DEFAULT_OCR_MODEL_VERSION
@@ -89,6 +96,108 @@ def _require_local_paddle_model(model_directory: str | Path) -> None:
         )
 
 
+def _paddlex_model_directories(
+    language: str, cache_root: Path | None = None
+) -> tuple[tuple[str, Path], ...]:
+    """Resolve PaddleOCR 3.x model names to PaddleX's local cache only."""
+    try:
+        model_names = _PADDLEOCR3_MODEL_NAMES[language]
+    except KeyError as exc:
+        raise RuntimeError(
+            f"No local PaddleOCR 3 model mapping is configured for {language!r}."
+        ) from exc
+
+    if cache_root is None:
+        cache_root = Path(
+            os.environ.get("PADDLE_PDX_CACHE_HOME", Path.home() / ".paddlex")
+        ).expanduser()
+    model_root = cache_root / "official_models"
+    return tuple((name, model_root / name) for name in model_names)
+
+
+def _require_local_paddlex_model(model_name: str, model_directory: Path) -> None:
+    missing_files = [
+        name
+        for name in _PADDLEX_MODEL_FILES
+        if not (model_directory / name).is_file()
+    ]
+    if not any(
+        (model_directory / name).is_file()
+        for name in _PADDLEX_MODEL_PROGRAM_FILES
+    ):
+        missing_files.append("inference.json or inference.pdmodel")
+    if missing_files:
+        raise FileNotFoundError(
+            f"Required local PaddleX OCR model {model_name!r} is missing or "
+            f"incomplete at {model_directory}; missing: "
+            f"{', '.join(missing_files)}. Model downloads are disabled."
+        )
+
+
+def _invoke_paddle_ocr(reader: Any, image: NDArray[np.uint8]) -> Any:
+    """Use the installed reader's OCR API without masking inference errors."""
+    ocr_method = reader.ocr
+    if "cls" in inspect.signature(ocr_method).parameters:
+        return ocr_method(image, cls=True)
+
+    predict_method = getattr(reader, "predict", None)
+    if callable(predict_method):
+        return predict_method(image)
+    return ocr_method(image)
+
+
+def _is_paddlex_ocr_result(value: Any) -> bool:
+    get_value = getattr(value, "get", None)
+    return callable(get_value) and get_value("rec_texts") is not None
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    return list(value)
+
+
+def _ocr_result_rows(result: Any) -> list[tuple[Any, Any, Any]]:
+    """Normalize PaddleOCR 2.x lines and PaddleX 3.x result objects."""
+    if result is None:
+        return []
+
+    if _is_paddlex_ocr_result(result):
+        paddlex_results = [result]
+    elif isinstance(result, (list, tuple)):
+        if not result:
+            return []
+        if _is_paddlex_ocr_result(result[0]):
+            paddlex_results = result
+        else:
+            legacy_lines = result[0]
+            if legacy_lines is None:
+                return []
+            return [
+                (text, confidence, polygon)
+                for polygon, (text, confidence) in legacy_lines
+            ]
+    else:
+        return []
+
+    rows: list[tuple[Any, Any, Any]] = []
+    for paddlex_result in paddlex_results:
+        texts = _as_list(paddlex_result.get("rec_texts"))
+        confidences = _as_list(paddlex_result.get("rec_scores"))
+        polygons = paddlex_result.get("dt_polys")
+        if polygons is None or len(polygons) == 0:
+            polygons = paddlex_result.get("rec_polys")
+        rows.extend(
+            (text, confidence, polygon)
+            for text, confidence, polygon in zip(
+                texts, confidences, _as_list(polygons)
+            )
+        )
+    return rows
+
+
 class OCREngine:
     SUPPORTED_LANGS: list[str] = ["ko", "ja", "zh", "zh-Hant"]
 
@@ -106,44 +215,71 @@ class OCREngine:
     def _get_reader(self, lang_key: str) -> Any:
         if lang_key not in self._readers:
             try:
-                from paddleocr import PaddleOCR
+                import paddleocr
             except ImportError as e:
                 raise RuntimeError(
                     "PaddleOCR is required to run OCR. "
                     "Install the production dependencies from requirements.txt."
                 ) from e
+            PaddleOCR = paddleocr.PaddleOCR
             paddle_lang = _PADDLE_LANG_MAP.get(lang_key, "ch")
-            paddleocr_module = sys.modules.get(PaddleOCR.__module__)
-            if paddleocr_module is None or not callable(
-                getattr(paddleocr_module, "maybe_download", None)
-            ):
-                raise RuntimeError(
-                    "Cannot verify that PaddleOCR model downloads are disabled."
+            version = getattr(paddleocr, "__version__", "")
+            try:
+                major_version = int(version.split(".", maxsplit=1)[0])
+            except (TypeError, ValueError):
+                major_version = 2
+
+            if major_version >= 3:
+                model_specs = _paddlex_model_directories(paddle_lang)
+                for model_name, model_directory in model_specs:
+                    _require_local_paddlex_model(model_name, model_directory)
+
+                detection_spec, recognition_spec = model_specs
+                detection_name, detection_directory = detection_spec
+                recognition_name, recognition_directory = recognition_spec
+                with _PADDLE_READER_INIT_LOCK:
+                    reader = PaddleOCR(
+                        text_detection_model_name=detection_name,
+                        text_detection_model_dir=str(detection_directory),
+                        text_recognition_model_name=recognition_name,
+                        text_recognition_model_dir=str(recognition_directory),
+                        use_doc_orientation_classify=False,
+                        use_doc_unwarping=False,
+                        use_textline_orientation=False,
+                        enable_mkldnn=False,
+                        device="gpu:0" if self._use_gpu else "cpu",
+                    )
+            else:
+                paddleocr_module = sys.modules.get(PaddleOCR.__module__)
+                if paddleocr_module is None or not callable(
+                    getattr(paddleocr_module, "maybe_download", None)
+                ):
+                    raise RuntimeError(
+                        "Cannot verify that PaddleOCR model downloads are disabled."
+                    )
+                model_directories = _paddle_model_directories(
+                    paddleocr_module, paddle_lang
                 )
-            model_directories = _paddle_model_directories(
-                paddleocr_module, paddle_lang
-            )
-            for model_directory in model_directories:
-                _require_local_paddle_model(model_directory)
-
-            # PaddleOCR 2.x calls maybe_download during construction. Replace
-            # that function under a lock so a file removed after preflight
-            # cannot trigger a request-time download.
-            with _PADDLE_READER_INIT_LOCK:
-                original_downloader = paddleocr_module.maybe_download
-
-                def require_local_model(model_directory, _url):
+                for model_directory in model_directories:
                     _require_local_paddle_model(model_directory)
 
-                paddleocr_module.maybe_download = require_local_model
-                try:
-                    reader = PaddleOCR(
-                        lang=paddle_lang,
-                        use_gpu=self._use_gpu,
-                        show_log=False,
-                    )
-                finally:
-                    paddleocr_module.maybe_download = original_downloader
+                # PaddleOCR 2.x calls maybe_download during construction.
+                # Replace it under a lock to stop request-time downloads.
+                with _PADDLE_READER_INIT_LOCK:
+                    original_downloader = paddleocr_module.maybe_download
+
+                    def require_local_model(model_directory, _url):
+                        _require_local_paddle_model(model_directory)
+
+                    paddleocr_module.maybe_download = require_local_model
+                    try:
+                        reader = PaddleOCR(
+                            lang=paddle_lang,
+                            use_gpu=self._use_gpu,
+                            show_log=False,
+                        )
+                    finally:
+                        paddleocr_module.maybe_download = original_downloader
             self._readers[lang_key] = reader
         return self._readers[lang_key]
 
@@ -175,12 +311,9 @@ class OCREngine:
             if not reader_was_loaded:
                 model_load_time_ms += (time.perf_counter() - load_start) * 1000
             ocr_start = time.perf_counter()
-            result = reader.ocr(image, cls=True)
+            result = _invoke_paddle_ocr(reader, image)
             ocr_engine_time_ms += (time.perf_counter() - ocr_start) * 1000
-            if result is None or result[0] is None:
-                continue
-            for line in result[0]:
-                bbox_points, (text, conf) = line
+            for text, conf, bbox_points in _ocr_result_rows(result):
                 if conf < self.confidence_threshold:
                     continue
                 text = text.strip()

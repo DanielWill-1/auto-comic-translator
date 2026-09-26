@@ -1,0 +1,219 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: #272536;
+  background: #f1f0ed;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+}
+
+.site-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  border-bottom: 1px solid #e2e0db;
+  background: #fffefa;
+}
+
+.header-inner,
+.page-shell {
+  width: min(100% - 32px, 850px);
+  margin-inline: auto;
+}
+
+.header-inner {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wordmark {
+  color: #37324e;
+  font-size: 16px;
+  font-weight: 750;
+  letter-spacing: -0.4px;
+  text-decoration: none;
+}
+
+.fixture-label,
+.eyebrow {
+  color: #77738c;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+
+.page-shell {
+  padding-block: 27px 46px;
+}
+
+.intro-card,
+.negative-cases {
+  padding: 21px;
+  border: 1px solid #e2dfda;
+  border-radius: 15px;
+  background: #fffefa;
+  box-shadow: 0 7px 24px #2420330a;
+}
+
+h1,
+h2,
+p,
+figure {
+  margin: 0;
+}
+
+h1 {
+  margin-top: 6px;
+  font-size: clamp(23px, 4vw, 31px);
+  letter-spacing: -0.8px;
+}
+
+.intro-card > p:not(.eyebrow) {
+  max-width: 620px;
+  margin-top: 8px;
+  color: #686579;
+  line-height: 1.6;
+}
+
+.add-button {
+  min-height: 39px;
+  margin-top: 16px;
+  padding-inline: 14px;
+  border: 0;
+  border-radius: 9px;
+  background: #6456b9;
+  color: white;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.add-button:hover {
+  background: #5245a2;
+}
+
+.added-count {
+  margin-left: 8px;
+  color: #77738c;
+  font-size: 11px;
+}
+
+.comic-reader {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  margin-block: 21px 30px;
+}
+
+.comic-panel {
+  width: 100%;
+  padding: 13px;
+  border: 1px solid #e2dfda;
+  border-radius: 12px;
+  background: #fffefa;
+  text-align: center;
+}
+
+.comic-panel figcaption,
+.fixture-card figcaption {
+  margin-bottom: 10px;
+  color: #77738c;
+  font-size: 11px;
+  text-align: left;
+}
+
+.comic-image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+.negative-cases h2 {
+  margin-top: 5px;
+  font-size: 18px;
+  letter-spacing: -0.3px;
+}
+
+.fixture-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.fixture-card {
+  display: flex;
+  min-height: 126px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed #d5d2cc;
+  border-radius: 10px;
+  background: #faf9f6;
+}
+
+.fixture-card figcaption,
+.hidden-card span {
+  margin: 0;
+  color: #77738c;
+  font-size: 11px;
+}
+
+.fixture-card img {
+  max-width: 100%;
+}
+
+.banner-card {
+  grid-column: span 2;
+  min-height: 126px;
+}
+
+.banner-card img {
+  width: 100%;
+  height: auto;
+}
+
+.hidden-image {
+  display: none;
+}
+
+.site-footer {
+  padding: 17px;
+  border-top: 1px solid #e2e0db;
+  background: #fffefa;
+  color: #77738c;
+  font-size: 11px;
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .fixture-label {
+    font-size: 8px;
+  }
+
+  .banner-card {
+    grid-column: auto;
+  }
+
+  .added-count {
+    display: block;
+    margin: 8px 0 0;
+  }
+}

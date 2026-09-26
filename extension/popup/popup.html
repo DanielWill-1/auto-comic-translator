@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Auto Comic Translator</title>
+    <link rel="stylesheet" href="popup.css">
+    <script type="module" src="popup.js"></script>
+  </head>
+  <body>
+    <main class="popup-shell">
+      <header class="header">
+        <div class="brand-mark" aria-hidden="true">A</div>
+        <div>
+          <h1>Auto Comic Translator</h1>
+          <p class="subtitle">Local translation preferences</p>
+        </div>
+      </header>
+
+      <section class="connection-card" aria-labelledby="connection-heading">
+        <div class="connection-copy">
+          <span id="connection-indicator" class="status-dot" aria-hidden="true"></span>
+          <div>
+            <h2 id="connection-heading">Backend status</h2>
+            <p id="connection-message" role="status" aria-live="polite">
+              Checking…
+            </p>
+          </div>
+        </div>
+        <button id="check-connection" class="text-button" type="button">
+          Check
+        </button>
+      </section>
+
+      <section class="settings-section" aria-label="Translation settings">
+        <div class="setting-row toggle-row">
+          <div class="setting-copy">
+            <label for="enabled">Translator</label>
+            <p>Alt+Click an outlined comic image on the local test page.</p>
+          </div>
+          <label class="switch" aria-label="Enable translator preference">
+            <input id="enabled" type="checkbox">
+            <span class="switch-track" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="field-row">
+          <label for="source-language">Source language</label>
+          <select id="source-language"></select>
+        </div>
+
+        <div class="field-row target-row">
+          <span class="field-label">Translation</span>
+          <div class="fixed-value">
+            <span>English</span>
+            <span class="fixed-tag">Only target available</span>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <label for="display-mode">Preferred display</label>
+          <select id="display-mode"></select>
+          <p class="field-hint">Saved preference for a later phase.</p>
+        </div>
+      </section>
+
+      <form id="backend-form" class="backend-section" novalidate>
+        <label for="backend-url">Backend URL</label>
+        <div class="backend-input-row">
+          <input
+            id="backend-url"
+            name="backendUrl"
+            type="text"
+            inputmode="url"
+            autocomplete="url"
+            spellcheck="false"
+            aria-describedby="backend-help backend-error"
+          >
+          <button class="save-button" type="submit">Save</button>
+        </div>
+        <p id="backend-help" class="field-hint">
+          Localhost works now. Other hosts need browser permission support
+          before they can be checked.
+        </p>
+        <p id="backend-error" class="field-error" aria-live="polite"></p>
+      </form>
+
+      <footer class="footer">
+        <span class="footer-lock" aria-hidden="true">●</span>
+        <span>Preferences stay on this device.</span>
+        <span id="save-feedback" class="save-feedback" aria-live="polite"></span>
+      </footer>
+    </main>
+  </body>
+</html>

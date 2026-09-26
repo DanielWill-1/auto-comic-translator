@@ -1,0 +1,75 @@
+/* Phase 3.2 development-only candidate outline. */
+img[data-act-comic-candidate="true"] {
+  outline: 4px solid #f15b3b !important;
+  outline-offset: 3px !important;
+}
+
+img[data-act-state="translating"] {
+  outline-style: dashed !important;
+  outline-color: #e3a008 !important;
+}
+
+.act-dev-result {
+  all: initial !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  width: min(100%, 38rem) !important;
+  margin: 0.75rem auto 1rem !important;
+  padding: 0.75rem !important;
+  border: 1px solid #e3a008 !important;
+  border-radius: 0.5rem !important;
+  background: #172033 !important;
+  color: #f8fafc !important;
+  font: 13px/1.45 system-ui, sans-serif !important;
+  text-align: left !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+
+.act-dev-result * {
+  box-sizing: border-box !important;
+  color: inherit !important;
+  font: inherit !important;
+}
+
+.act-dev-result-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 1rem !important;
+  margin-bottom: 0.4rem !important;
+}
+
+.act-dev-result-title {
+  font-weight: 700 !important;
+}
+
+.act-dev-result-close {
+  min-width: 2rem !important;
+  min-height: 2rem !important;
+  border: 1px solid #64748b !important;
+  border-radius: 0.3rem !important;
+  background: transparent !important;
+  cursor: pointer !important;
+}
+
+.act-dev-result-status,
+.act-dev-result-meta,
+.act-dev-result-request,
+.act-dev-result-list {
+  display: block !important;
+  margin: 0.35rem 0 0 !important;
+}
+
+.act-dev-result-status[data-state="error"] {
+  color: #fecaca !important;
+}
+
+.act-dev-result-list {
+  padding-left: 1.25rem !important;
+}
+
+.act-dev-result-list li {
+  margin-top: 0.45rem !important;
+  white-space: pre-wrap !important;
+}

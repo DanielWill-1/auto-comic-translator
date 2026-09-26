@@ -20,8 +20,11 @@ preprocessing, OCR extraction, translation, and structured output delivery.
 | Phase 2.5.2 | Readiness, structured errors, CORS, request limits and IDs | Complete |
 | Phase 2.5.3 | Local persistent SQLite cache | Complete |
 | Phase 2.5.4 | Pipeline timing instrumentation and local benchmark | Complete |
-| Phase 2.5.5 | Real-model integration and final backend hardening | In progress — see `docs/ROADMAP.md` |
-| Phase 3 | Browser extension with DOM scanning and overlay rendering | Planned — see `docs/ROADMAP.md` |
+| Phase 2.5.5 | Real-model integration and final backend hardening | Complete — known OCR asset gaps are documented |
+| Phase 3.1 | Chromium extension skeleton and backend connection | Complete — see `docs/ROADMAP.md` |
+| Phase 3.2 | Comic image discovery | Complete — manual Chromium verification passed |
+| Phase 3.3 | Explicit image translation round trip | Implemented — PaddleOCR 3.x compatibility fixed; HTTP verified; manual Chromium check pending |
+| Phase 3.4–3.7 | Translation queue, overlays, feed, and reliability | Planned — see `docs/ROADMAP.md` |
 | Phase 4 | Advanced typesetting, chapter-wide caching, faster inference | Planned |
 
 ## Architecture
@@ -58,7 +61,7 @@ scripts/            Development / setup utilities and local benchmark
 experiments/        Prototypes, ML experiments, exploration code
 tests/              Test scripts
 docs/               architecture.md, technical_document.md, ROADMAP.md
-extension/          Browser extension (Phase 3 — not yet implemented)
+extension/          Chromium Manifest V3 extension (Phase 3.3 development)
 datas/              Sample comic screenshots for testing (gitignored)
 models/             Local MarianMT models (gitignored)
 ```
@@ -125,6 +128,39 @@ pip install -r requirements-dev.txt
 # Download pretrained translation models (one-time)
 python scripts/download_models.py
 ```
+
+## Development
+
+### Load the Chromium extension
+
+1. Start the backend from the repository root with
+   `.\.venv\Scripts\python.exe -m backend.main`.
+2. Open `chrome://extensions` in Chrome or Chromium.
+3. Turn on **Developer mode**.
+4. Choose **Load unpacked** and select this repository's `extension/` folder.
+5. Open the Auto Comic Translator popup from the browser toolbar.
+6. Confirm the backend status shows **Backend connected**.
+
+The popup saves local preferences and checks the backend. During Phase 3.3,
+translation runs only when you Alt+Click an outlined comic candidate. This
+development-only flow uploads one image to `POST /translate` and shows a
+temporary debug result beside it; automatic translation and final overlays
+are not implemented.
+
+### Test image discovery
+
+From the repository root, run `python -m http.server 8080 --bind 127.0.0.1`
+and open `http://127.0.0.1:8080/dev/test-site/`. The fixture uses local sample
+images; orange outlines mark candidates. Select **Japanese** in the popup and
+Alt+Click the first Japanese sample to test a real round trip. The content
+script is limited to the exact `127.0.0.1` host. See
+[`dev/test-site/README.md`](dev/test-site/README.md) for the full manual check.
+
+The Phase 3.3 backend OCR compatibility fix supports PaddleOCR 2.x and 3.x.
+A real Japanese image returned OCR regions, and a real `POST /translate`
+request returned valid API v1 JSON. The Alt+Click browser round trip still
+needs manual verification; see [`HANDOFF.md`](HANDOFF.md) for results and the
+current checkpoint.
 
 ## Usage
 

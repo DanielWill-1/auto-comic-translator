@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Auto Comic Translator — Image Discovery Test</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="wordmark" href="#top">Panel Reader</a>
+        <span class="fixture-label">LOCAL EXTENSION TEST PAGE</span>
+      </div>
+    </header>
+
+    <main id="top" class="page-shell">
+      <section class="intro-card">
+        <p class="eyebrow">Phase 3.3 development fixture</p>
+        <h1>Image translation test reader</h1>
+        <p>
+          Orange outlines mark comic image candidates. Enable the translator
+          and Alt+Click one candidate to send that image for a local translation
+          check. Small interface images below should not be outlined.
+        </p>
+        <button id="add-comic-image" class="add-button" type="button">
+          Add another comic image
+        </button>
+        <span id="added-count" class="added-count" aria-live="polite">
+          No extra images added
+        </span>
+      </section>
+
+      <section id="comic-reader" class="comic-reader" aria-label="Comic samples">
+        <figure class="comic-panel">
+          <figcaption>Japanese portrait page · 436 × 654</figcaption>
+          <img
+            class="comic-image"
+            src="../../datas/japanes/Screenshot%202026-06-29%20122805.png"
+            alt="Japanese comic page with panels and speech bubbles"
+          >
+        </figure>
+        <figure class="comic-panel">
+          <figcaption>Chinese landscape snippet · 773 × 356</figcaption>
+          <img
+            class="comic-image"
+            src="../../datas/chinese/Screenshot%202026-09-26%20015428.png"
+            alt="Chinese comic speech bubble in a wide crop"
+          >
+        </figure>
+        <figure class="comic-panel">
+          <figcaption>Korean near-square panel · 555 × 588</figcaption>
+          <img
+            class="comic-image"
+            src="../../datas/korean/Screenshot%202026-09-26%20015554.png"
+            alt="Korean comic sound effect panel"
+          >
+        </figure>
+      </section>
+
+      <section class="negative-cases" aria-labelledby="negative-title">
+        <p class="eyebrow">Negative cases</p>
+        <h2 id="negative-title">Small reader assets should stay unmarked</h2>
+        <div class="fixture-grid">
+          <figure class="fixture-card">
+            <img src="assets/tiny-icon.svg" alt="" width="28" height="28">
+            <figcaption>Tiny icon · 28 × 28</figcaption>
+          </figure>
+          <figure class="fixture-card">
+            <img src="assets/avatar.svg" alt="" width="96" height="96">
+            <figcaption>Avatar · 96 × 96</figcaption>
+          </figure>
+          <figure class="fixture-card banner-card">
+            <img src="assets/banner.svg" alt="" width="960" height="120">
+            <figcaption>Banner · 960 × 120</figcaption>
+          </figure>
+          <figure class="fixture-card hidden-card">
+            <span>Hidden image · expected unmarked</span>
+            <img
+              class="hidden-image"
+              src="../../datas/japanes/Screenshot%202026-06-29%20122805.png"
+              alt=""
+            >
+          </figure>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      Local-only fixture · comic samples are referenced from this repository
+    </footer>
+  </body>
+</html>
