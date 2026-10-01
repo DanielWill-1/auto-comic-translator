@@ -4,6 +4,7 @@ img[data-act-comic-candidate="true"] {
   outline-offset: 3px !important;
 }
 
+img[data-act-state="queued"],
 img[data-act-state="translating"] {
   outline-style: dashed !important;
   outline-color: #e3a008 !important;
@@ -72,4 +73,210 @@ img[data-act-state="translating"] {
 .act-dev-result-list li {
   margin-top: 0.45rem !important;
   white-space: pre-wrap !important;
+}
+
+.act-dev-result-details summary {
+  margin-top: 0.35rem !important;
+  cursor: pointer !important;
+  color: #93c5fd !important;
+}
+
+/* Phase 3.5 development overlay. The bitmap is never modified: translated
+   regions are drawn as DOM nodes positioned over the image. */
+.act-overlay-layer {
+  all: initial !important;
+  position: absolute !important;
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  pointer-events: none !important;
+  overflow: visible !important;
+}
+
+.act-translation-region {
+  position: absolute !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 2px 4px !important;
+  border-radius: 4px !important;
+  background: rgba(15, 23, 42, 0.85) !important;
+  color: #f8fafc !important;
+  font-family: system-ui, sans-serif !important;
+  font-weight: 600 !important;
+  line-height: 1.15 !important;
+  text-align: center !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  pointer-events: none !important;
+}
+
+/* Phase 3.6 translation feed. A fixed overlay panel: it never changes the
+   comic reader's layout, and page styles cannot leak into it. */
+.act-feed {
+  all: initial !important;
+  position: fixed !important;
+  top: 12px !important;
+  right: 12px !important;
+  bottom: 12px !important;
+  width: min(30rem, 34vw) !important;
+  min-width: 16rem !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box !important;
+  z-index: 2147483100 !important;
+  border: 1px solid #334155 !important;
+  border-radius: 8px !important;
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+  font: 13px/1.4 system-ui, sans-serif !important;
+  text-align: left !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+  overflow: hidden !important;
+}
+
+.act-feed * {
+  box-sizing: border-box !important;
+  font: inherit !important;
+  color: inherit !important;
+}
+
+.act-feed[data-act-feed-open="false"] {
+  display: none !important;
+}
+
+.act-feed-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 0.5rem !important;
+  padding: 0.5rem 0.6rem !important;
+  border-bottom: 1px solid #334155 !important;
+  background: #172033 !important;
+}
+
+.act-feed-title {
+  font-weight: 700 !important;
+}
+
+.act-feed-close {
+  min-width: 1.75rem !important;
+  min-height: 1.75rem !important;
+  border: 1px solid #64748b !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  color: inherit !important;
+  cursor: pointer !important;
+}
+
+.act-feed-empty {
+  margin: 0.75rem !important;
+  color: #94a3b8 !important;
+}
+
+.act-feed-body {
+  flex: 1 1 auto !important;
+  overflow-y: auto !important;
+  padding: 0.5rem !important;
+}
+
+.act-feed-entry {
+  border: 1px solid #334155 !important;
+  border-radius: 6px !important;
+  margin-bottom: 0.5rem !important;
+  background: #111827 !important;
+  overflow: hidden !important;
+}
+
+.act-feed-entry-active {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 0 1px #38bdf8 inset !important;
+}
+
+.act-feed-entry-header {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: baseline !important;
+  gap: 0.4rem !important;
+  width: 100% !important;
+  padding: 0.45rem 0.55rem !important;
+  border: 0 !important;
+  border-bottom: 1px solid #1f2937 !important;
+  background: #172033 !important;
+  color: inherit !important;
+  text-align: left !important;
+  cursor: pointer !important;
+}
+
+.act-feed-entry-title {
+  font-weight: 700 !important;
+}
+
+.act-feed-entry-langs,
+.act-feed-entry-status {
+  color: #93c5fd !important;
+}
+
+.act-feed-entry-body {
+  padding: 0.5rem 0.55rem !important;
+}
+
+.act-feed-region + .act-feed-region {
+  margin-top: 0.6rem !important;
+  padding-top: 0.6rem !important;
+  border-top: 1px dashed #1f2937 !important;
+}
+
+.act-feed-label {
+  display: block !important;
+  font-size: 11px !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: #94a3b8 !important;
+}
+
+.act-feed-original,
+.act-feed-translated {
+  margin: 0.15rem 0 0.35rem !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+}
+
+.act-feed-original {
+  color: #cbd5e1 !important;
+}
+
+.act-feed-translated {
+  color: #f8fafc !important;
+  font-weight: 600 !important;
+}
+
+.act-feed-region[data-act-feed-region="fallback"] .act-feed-translated {
+  color: #fcd34d !important;
+  font-weight: 400 !important;
+  font-style: italic !important;
+}
+
+.act-feed-entry[data-act-feed-state="error"] .act-feed-entry-status {
+  color: #fecaca !important;
+}
+
+.act-feed-toggle {
+  all: initial !important;
+  position: fixed !important;
+  right: 12px !important;
+  bottom: 12px !important;
+  z-index: 2147483100 !important;
+  display: inline-block !important;
+  padding: 0.4rem 0.7rem !important;
+  border: 1px solid #334155 !important;
+  border-radius: 999px !important;
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+  font: 600 12px/1 system-ui, sans-serif !important;
+  cursor: pointer !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
 }

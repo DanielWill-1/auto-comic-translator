@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Auto Comic Translator — Image Discovery Test</title>
+    <title>Auto Comic Translator — Chapter Test Fixture</title>
     <link rel="stylesheet" href="styles.css">
     <script src="site.js" defer></script>
   </head>
@@ -17,63 +17,215 @@
 
     <main id="top" class="page-shell">
       <section class="intro-card">
-        <p class="eyebrow">Phase 3.3 development fixture</p>
-        <h1>Image translation test reader</h1>
+        <p class="eyebrow">Phase 3.6 chapter fixture</p>
+        <h1>Chapter translation test reader</h1>
         <p>
-          Orange outlines mark comic image candidates. Enable the translator
-          and Alt+Click one candidate to send that image for a local translation
-          check. Small interface images below should not be outlined.
+          Orange outlines mark comic image candidates. Scroll to translate
+          progressively, or Alt+Click one image. Translated text is drawn over
+          the image and listed in the translation feed (bottom-right button).
+          Small interface images and below-threshold crops stay unmarked.
         </p>
-        <button id="add-comic-image" class="add-button" type="button">
-          Add another comic image
-        </button>
-        <span id="added-count" class="added-count" aria-live="polite">
-          No extra images added
-        </span>
+        <div class="control-row">
+          <button id="add-comic-image" class="add-button" type="button">
+            Add dynamic comic image
+          </button>
+          <button id="remove-comic-image" class="add-button" type="button">
+            Remove dynamic image
+          </button>
+          <button id="load-lazy-image" class="add-button" type="button">
+            Load real image
+          </button>
+          <button id="toggle-responsive" class="add-button" type="button">
+            Toggle responsive width
+          </button>
+          <span id="added-count" class="added-count" aria-live="polite">
+            No extra images added
+          </span>
+        </div>
       </section>
 
-      <section id="comic-reader" class="comic-reader" aria-label="Comic samples">
-        <figure class="comic-panel">
-          <figcaption>Japanese portrait page · 436 × 654</figcaption>
-          <img
-            class="comic-image"
-            src="../../datas/japanes/Screenshot%202026-06-29%20122805.png"
-            alt="Japanese comic page with panels and speech bubbles"
-          >
-        </figure>
-        <figure class="comic-panel">
-          <figcaption>Chinese landscape snippet · 773 × 356</figcaption>
-          <img
-            class="comic-image"
-            src="../../datas/chinese/Screenshot%202026-09-26%20015428.png"
-            alt="Chinese comic speech bubble in a wide crop"
-          >
-        </figure>
-        <figure class="comic-panel">
-          <figcaption>Korean near-square panel · 555 × 588</figcaption>
-          <img
-            class="comic-image"
-            src="../../datas/korean/Screenshot%202026-09-26%20015554.png"
-            alt="Korean comic sound effect panel"
-          >
-        </figure>
+      <section class="chapter-section" aria-labelledby="japanese-title">
+        <p class="eyebrow">Chapter section 1</p>
+        <h2 id="japanese-title">Japanese pages</h2>
+        <div id="comic-reader-japanese" class="comic-reader">
+          <figure class="comic-panel">
+            <figcaption>Japanese portrait 1 — 434 × 640</figcaption>
+            <img
+              class="comic-image"
+              src="../../datas/japanes/Screenshot%202026-06-29%20122747.png"
+              alt="Japanese comic page with several speech bubbles"
+            >
+          </figure>
+          <figure class="comic-panel">
+            <figcaption>Japanese portrait 2 — 440 × 622</figcaption>
+            <img
+              class="comic-image"
+              src="../../datas/japanes/Screenshot%202026-06-29%20122754.png"
+              alt="Japanese comic page with panel artwork"
+            >
+          </figure>
+          <figure class="comic-panel">
+            <figcaption>Japanese portrait 3 — 423 × 657</figcaption>
+            <img
+              class="comic-image"
+              src="../../datas/japanes/Screenshot%202026-06-29%20122757.png"
+              alt="Japanese comic page with dialogue"
+            >
+          </figure>
+          <figure class="comic-panel">
+            <figcaption>Japanese portrait 4 — 436 × 654</figcaption>
+            <img
+              class="comic-image"
+              src="../../datas/japanes/Screenshot%202026-06-29%20122805.png"
+              alt="Japanese comic page with panels and speech bubbles"
+            >
+          </figure>
+        </div>
+      </section>
+
+      <section class="chapter-section" aria-labelledby="chinese-title">
+        <p class="eyebrow">Chapter section 2</p>
+        <h2 id="chinese-title">Chinese pages</h2>
+        <div id="comic-reader-chinese" class="comic-reader">
+          <figure class="comic-panel">
+            <figcaption>Chinese wide landscape 1 — 1123 × 358</figcaption>
+            <img
+              class="comic-image"
+              src="../../datas/chinese/Screenshot%202026-09-26%20015218.png"
+              alt="Wide Chinese comic strip with dialogue"
+            >
+          </figure>
+          <figure class="comic-panel">
+            <figcaption>Chinese landscape 2 — 773 × 356</figcaption>
+            <img
+              class="comic-image"
+              src="../../datas/chinese/Screenshot%202026-09-26%20015428.png"
+              alt="Chinese comic speech bubble in a wide crop"
+            >
+          </figure>
+          <figure class="comic-panel">
+            <figcaption>Chinese landscape 3 — 829 × 472</figcaption>
+            <img
+              class="comic-image"
+              src="../../datas/chinese/Screenshot%202026-09-26%20015443.png"
+              alt="Chinese comic panel with several bubbles"
+            >
+          </figure>
+        </div>
+      </section>
+
+      <section class="chapter-section" aria-labelledby="korean-title">
+        <p class="eyebrow">Chapter section 3</p>
+        <h2 id="korean-title">Korean pages</h2>
+        <div id="comic-reader-korean" class="comic-reader">
+          <figure class="comic-panel">
+            <figcaption>Korean near-square — 555 × 588 (no text expected)</figcaption>
+            <img
+              class="comic-image"
+              src="../../datas/korean/Screenshot%202026-09-26%20015554.png"
+              alt="Korean comic sound effect panel without readable text"
+            >
+          </figure>
+          <figure class="comic-panel">
+            <figcaption>Korean landscape — 451 × 335</figcaption>
+            <img
+              class="comic-image"
+              src="../../datas/korean/Screenshot%202026-09-26%20015601.png"
+              alt="Korean comic panel with dialogue"
+            >
+          </figure>
+        </div>
+      </section>
+
+      <section class="chapter-section" aria-labelledby="stress-title">
+        <p class="eyebrow">Stress cases</p>
+        <h2 id="stress-title">Layout and lifecycle stress cases</h2>
+
+        <div class="fixture-grid">
+          <figure class="fixture-card">
+            <figcaption>
+              Duplicate source, rendered twice — 436 × 654 (same source as
+              Japanese portrait 4)
+            </figcaption>
+            <img
+              class="comic-image"
+              src="../../datas/japanes/Screenshot%202026-06-29%20122805.png"
+              alt="Duplicate copy of the Japanese sample"
+            >
+            <img
+              class="comic-image"
+              src="../../datas/japanes/Screenshot%202026-06-29%20122805.png"
+              alt="Second duplicate copy of the Japanese sample"
+            >
+          </figure>
+
+          <figure class="fixture-card responsive-card">
+            <figcaption>
+              Responsive image — 450 × 656, width 100% with max-width
+            </figcaption>
+            <img
+              class="comic-image responsive-image"
+              src="../../datas/japanes/Screenshot%202026-06-29%20122810.png"
+              alt="Japanese sample used for responsive resize checks"
+            >
+          </figure>
+
+          <figure class="fixture-card narrow-card">
+            <figcaption>
+              Narrow display — 423 × 657 shown at 180 px wide (wrapping check)
+            </figcaption>
+            <img
+              class="comic-image narrow-image"
+              src="../../datas/japanes/Screenshot%202026-06-29%20122757.png"
+              alt="Japanese sample shown narrow for text wrapping checks"
+            >
+          </figure>
+
+          <figure class="fixture-card lazy-card">
+            <figcaption>
+              Lazy-loaded source — placeholder until "Load real image" is pressed
+            </figcaption>
+            <img
+              id="lazy-comic-image"
+              class="comic-image"
+              src="assets/placeholder.svg"
+              alt="Placeholder for the lazy source replacement test"
+            >
+          </figure>
+
+          <figure class="fixture-card">
+            <figcaption>Broken image — expected to be ignored safely</figcaption>
+            <img
+              class="comic-image"
+              src="assets/missing-comic-page.png"
+              alt="Intentionally broken image source"
+            >
+          </figure>
+
+          <figure class="fixture-card">
+            <figcaption>Tiny raster — 32 × 24, below detection thresholds</figcaption>
+            <img src="assets/tiny-panel.png" alt="" width="32" height="24">
+          </figure>
+        </div>
+
+        <div id="dynamic-reader" class="comic-reader dynamic-reader"></div>
       </section>
 
       <section class="negative-cases" aria-labelledby="negative-title">
         <p class="eyebrow">Negative cases</p>
-        <h2 id="negative-title">Small reader assets should stay unmarked</h2>
+        <h2 id="negative-title">Reader assets and crops that must stay unmarked</h2>
         <div class="fixture-grid">
           <figure class="fixture-card">
             <img src="assets/tiny-icon.svg" alt="" width="28" height="28">
-            <figcaption>Tiny icon · 28 × 28</figcaption>
+            <figcaption>SVG icon · 28 × 28 — rejected</figcaption>
           </figure>
           <figure class="fixture-card">
             <img src="assets/avatar.svg" alt="" width="96" height="96">
-            <figcaption>Avatar · 96 × 96</figcaption>
+            <figcaption>SVG avatar · 96 × 96 — rejected</figcaption>
           </figure>
           <figure class="fixture-card banner-card">
             <img src="assets/banner.svg" alt="" width="960" height="120">
-            <figcaption>Banner · 960 × 120</figcaption>
+            <figcaption>SVG banner · 960 × 120 — rejected (too short)</figcaption>
           </figure>
           <figure class="fixture-card hidden-card">
             <span>Hidden image · expected unmarked</span>
@@ -82,6 +234,34 @@
               src="../../datas/japanes/Screenshot%202026-06-29%20122805.png"
               alt=""
             >
+          </figure>
+          <figure class="fixture-card">
+            <img src="../../datas/japanes/Screenshot%202026-06-29%20122412.png" alt="" width="404" height="153">
+            <figcaption>Japanese crop · 404 × 153 — below minimum height</figcaption>
+          </figure>
+          <figure class="fixture-card">
+            <img src="../../datas/japanes/Screenshot%202026-06-29%20122415.png" alt="" width="432" height="113">
+            <figcaption>Japanese crop · 432 × 113 — below minimum height</figcaption>
+          </figure>
+          <figure class="fixture-card">
+            <img src="../../datas/japanes/Screenshot%202026-06-29%20122417.png" alt="" width="427" height="69">
+            <figcaption>Japanese crop · 427 × 69 — below minimum height</figcaption>
+          </figure>
+          <figure class="fixture-card">
+            <img src="../../datas/chinese/Screenshot%202026-09-26%20015435.png" alt="" width="663" height="297">
+            <figcaption>Chinese crop · 663 × 297 — below minimum height</figcaption>
+          </figure>
+          <figure class="fixture-card">
+            <img src="../../datas/chinese/Screenshot%202026-09-26%20015438.png" alt="" width="710" height="287">
+            <figcaption>Chinese crop · 710 × 287 — below minimum height</figcaption>
+          </figure>
+          <figure class="fixture-card">
+            <img src="../../datas/korean/Screenshot%202026-09-26%20015537.png" alt="" width="486" height="297">
+            <figcaption>Korean crop · 486 × 297 — below minimum height</figcaption>
+          </figure>
+          <figure class="fixture-card">
+            <img src="../../datas/korean/Screenshot%202026-09-26%20015541.png" alt="" width="415" height="169">
+            <figcaption>Korean crop · 415 × 169 — below minimum height</figcaption>
           </figure>
         </div>
       </section>

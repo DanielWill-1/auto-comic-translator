@@ -107,6 +107,34 @@ regions, the resolved top-level language is `unknown` and `regions` is empty.
 | `regions[].translation_status` | `"ok"` = successfully translated. `"fallback"` = local model unavailable or inference failed and the original text was echoed. |
 | `regions[].bbox_points` | Original OCR polygon points retained for clients of the previous response shape. `bbox` is the browser-friendly axis-aligned box. |
 
+### Auto-mode OCR readers
+
+`source_language=auto` runs the configured OCR readers whose **local** model
+files are complete and skips the ones that are not, because implicit model
+downloads are disabled. A partial local installation therefore still works: with
+only the shared `PP-OCRv6` detection/recognition models installed, `auto` uses
+the Japanese and Chinese readers and skips Korean instead of failing the whole
+request.
+
+Auto mode applies two rules:
+
+1. **One pass per distinct model set.** `ja`, `zh`, and `zh-Hant` resolve to the
+   same `PP-OCRv6` files, so that model set runs once rather than once per
+   language. A model set whose files cannot be resolved keeps its own key and is
+   never merged with another language.
+2. **The recognized text names the language, not the reader.** The reader key is
+   an installation detail, not a detection result. Each line is labelled by its
+   script (Hangul → `ko`, kana → `ja`, Han → `zh`); a line with no identifiable
+   script (digits, Latin, symbols) takes the page's confidence-weighted dominant
+   script language, so a short misread cannot outvote the page's real text. Han
+   cannot distinguish Simplified from Traditional Chinese, so Han-only pages
+   resolve to `zh`; request `zh-Hant` explicitly for Traditional Chinese.
+
+An explicit `source_language` stays strict: if that language's OCR model files
+are missing, the request reports a controlled setup error instead of silently
+returning empty OCR output, and its regions are never relabelled. `GET /ready`
+lists the readers auto mode will use in `ocr_languages`.
+
 ### Timing breakdown
 
 `/translate` adds a `timing` object to API v1 responses. Values are
@@ -195,6 +223,7 @@ details and stack traces are not returned.
 | `413` | `REQUEST_TOO_LARGE` or `IMAGE_TOO_LARGE`. |
 | `422` | `VALIDATION_ERROR`, such as a missing multipart field. |
 | `404` / `405` | `NOT_FOUND` / `METHOD_NOT_ALLOWED`. |
+| `503` | `OCR_READERS_UNAVAILABLE`; no configured OCR reader has complete local model files. Returned when `auto` has no usable reader, and also when an explicitly requested language has no local models for it (the request is never answered with an empty result). Local model paths stay in the server log. |
 | `5xx` | `INTERNAL_ERROR`; server details are logged locally and omitted from the response. |
 
 When a translation model is missing or inference fails, the request still
@@ -314,9 +343,12 @@ Same request shape as `/translate`, but runs **OCR only** and returns:
 `/ready` checks whether every configured OCR reader is already initialized and
 whether Transformers plus all local Marian model directories, weights, and
 tokenizer files are present. It does not load models or run inference. It
-returns `ocr_ready` and `translation_ready`; the HTTP status is `200` when both
-are true and `503` otherwise. A missing local model makes readiness false;
-requests can still return OCR with per-region `translation_status: "fallback"`.
+returns `ocr_ready`, `translation_ready`, and the additive `ocr_languages` list
+(the readers `source_language=auto` will use, derived from local files only);
+the HTTP status is `200` when both flags are true and `503` otherwise. A missing
+local model makes `ocr_ready` false, while auto-mode requests can still succeed
+with the readers that are installed. Requests can still return OCR with
+per-region `translation_status: "fallback"`.
 
 ## Request IDs and CORS
 

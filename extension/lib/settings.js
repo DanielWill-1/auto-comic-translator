@@ -6,6 +6,7 @@ import {
 
 export const DEFAULT_SETTINGS = Object.freeze({
   enabled: true,
+  showOverlays: true,
   backendUrl: DEFAULT_BACKEND_URL,
   sourceLanguage: "auto",
   targetLanguage: "en",
@@ -67,6 +68,10 @@ export async function loadSettings() {
       typeof stored.enabled === "boolean"
         ? stored.enabled
         : DEFAULT_SETTINGS.enabled,
+    showOverlays:
+      typeof stored.showOverlays === "boolean"
+        ? stored.showOverlays
+        : DEFAULT_SETTINGS.showOverlays,
     backendUrl,
     sourceLanguage: SOURCE_VALUES.has(stored.sourceLanguage)
       ? stored.sourceLanguage
@@ -86,6 +91,9 @@ export async function saveSetting(key, value) {
   let validatedValue = value;
   if (key === "enabled" && typeof value !== "boolean") {
     throw new Error("Invalid translator setting.");
+  }
+  if (key === "showOverlays" && typeof value !== "boolean") {
+    throw new Error("Invalid overlay setting.");
   }
   if (key === "backendUrl") {
     validatedValue = normalizeBackendUrl(value);

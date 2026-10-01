@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="200" viewBox="0 0 360 200" role="img" aria-label="Lazy source placeholder">
+  <rect width="360" height="200" fill="#eceaf5"/>
+  <rect x="6" y="6" width="348" height="188" fill="none" stroke="#b9b3d6" stroke-width="3" stroke-dasharray="10 8"/>
+  <text x="180" y="104" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="16" fill="#6a648c">
+    Placeholder
+  </text>
+</svg>

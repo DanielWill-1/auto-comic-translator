@@ -220,7 +220,7 @@ def test_zh_hans_hant_map_to_chinese_model():
     assert provider._model_key("ko", "en") == "ko-en"
 
 
-def test_ocr_auto_preserves_the_reader_language():
+def test_ocr_auto_preserves_the_reader_language(monkeypatch):
     class Reader:
         def __init__(self, text, x):
             self.text = text
@@ -236,6 +236,11 @@ def test_ocr_auto_preserves_the_reader_language():
     engine = OCREngine()
     x_positions = {"ko": 0, "ja": 100, "zh": 200, "zh-Hant": 300}
     engine._get_reader = lambda lang: Reader(lang, x_positions[lang])
+    # Auto mode only uses readers whose local models are installed; this test
+    # treats every configured reader as available so all of them run.
+    monkeypatch.setattr(
+        "backend.ocr.is_reader_available", lambda lang: lang in x_positions
+    )
     detected = engine.recognize(np.zeros((100, 500, 3), dtype=np.uint8), "auto")
     assert {region.language for region in detected.results} == set(
         engine.SUPPORTED_LANGS

@@ -45,7 +45,7 @@ from backend.full_pipeline import (
     FullPipelineResult,
     full_pipeline_result_to_dict,
 )
-from backend.ocr import OCREngine, OCRResponse
+from backend.ocr import OCREngine, OCRResponse, OCRSetupError, is_reader_available
 from backend.pipeline import OCRPipeline
 from backend.utils import (
     ImageValidationError,
@@ -359,6 +359,27 @@ async def request_validation_error_handler(
     )
 
 
+@app.exception_handler(OCRSetupError)
+async def ocr_setup_error_handler(
+    request: Request, exc: OCRSetupError
+) -> JSONResponse:
+    """Report an unusable local OCR setup as a controlled, safe API error.
+
+    Local model paths and other filesystem details stay in the server log; the
+    client receives the standard error envelope instead of a generic 500.
+    """
+    request_id = getattr(request.state, "request_id", uuid.uuid4().hex)
+    logger.warning("OCR setup error request_id=%s: %s", request_id, exc)
+    return _error_response(
+        request_id,
+        503,
+        "OCR_READERS_UNAVAILABLE",
+        "No local OCR readers are available for the requested language. "
+        "Install the local OCR model assets before translating; requests do "
+        "not download models.",
+    )
+
+
 async def _read_image_upload(image: UploadFile) -> tuple[bytes, np.ndarray]:
     if not image.content_type or not image.content_type.startswith("image/"):
         raise _request_error(400, "INVALID_IMAGE", "File must be an image.")
@@ -386,6 +407,19 @@ def _ocr_ready() -> bool:
     engine = getattr(_ocr_pipeline, "_ocr", None)
     readers = getattr(engine, "_readers", {})
     return set(OCREngine.SUPPORTED_LANGS).issubset(readers)
+
+
+def _available_ocr_languages() -> list[str]:
+    """Languages with complete local OCR model files; initializes nothing."""
+    if _ocr_pipeline is not None:
+        engine = getattr(_ocr_pipeline, "_ocr", None)
+        if engine is not None:
+            return engine.available_auto_languages()
+    return [
+        lang_key
+        for lang_key in OCREngine.SUPPORTED_LANGS
+        if is_reader_available(lang_key)
+    ]
 
 
 def _translation_ready() -> bool:
@@ -434,6 +468,8 @@ async def ready() -> JSONResponse:
             "api_version": API_VERSION,
             "ocr_ready": ocr_ready,
             "translation_ready": translation_ready,
+            # Additive diagnostic: the readers `source_language=auto` will use.
+            "ocr_languages": _available_ocr_languages(),
         },
     )
 

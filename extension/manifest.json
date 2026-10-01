@@ -15,6 +15,10 @@
       "css": ["content.css"],
       "js": [
         "lib/image-detector.js",
+        "lib/translation-queue.js",
+        "lib/lazy-observer.js",
+        "lib/overlay-renderer.js",
+        "lib/translation-feed.js",
         "lib/translation-api.js",
         "content.js"
       ],

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import functools
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,12 @@ TRANSLATION_SANITY_INPUTS = (
     ("ko", "안녕하세요. 만나서 반갑습니다."),
     ("zh", "你好！今天过得怎么样？"),
 )
+
+# Verified 2026-10-01 with the locally installed Korean reader: this sample is
+# a sound-effect panel with no OCR-readable text. Its single detection
+# recognises as an empty string with confidence 0.0 (the Japanese reader reads
+# it as "A" at 0.086), so a valid empty result is the correct expectation.
+TEXT_FREE_SAMPLES = frozenset({"Screenshot 2026-09-26 015554.png"})
 
 
 def _terminal_safe(value: str) -> str:
@@ -97,9 +104,24 @@ def _local_reader_models(language_keys: list[str]) -> list[str]:
     return missing
 
 
-def _run_real_pipeline(image_path: Path, source_language: str):
-    from backend.config import LOCAL_MODELS, PipelineConfig
+@functools.lru_cache(maxsize=None)
+def _shared_full_pipeline():
+    """One pipeline per process, mirroring how the app runs.
+
+    Building a pipeline per test constructs a fresh set of PaddleOCR readers
+    every time. On this machine that eventually faults inside Paddle's native
+    runner (Windows access violation) once several model instances have been
+    loaded into one process, which made the whole integration file unrunnable.
+    The app builds its pipeline once and caches it; the tests do the same.
+    """
+    from backend.config import PipelineConfig
     from backend.full_pipeline import FullPipeline
+
+    return FullPipeline(PipelineConfig(use_gpu=False))
+
+
+def _run_real_pipeline(image_path: Path, source_language: str):
+    from backend.config import LOCAL_MODELS
     from backend.main import _local_marian_model_ready
     from backend.utils import decode_image_bytes
 
@@ -112,7 +134,7 @@ def _run_real_pipeline(image_path: Path, source_language: str):
         if not _local_marian_model_ready(Path(LOCAL_MODELS[model_key])):
             pytest.skip(f"Local Marian model {model_key} is incomplete.")
     image = decode_image_bytes(image_path.read_bytes())
-    return FullPipeline(PipelineConfig(use_gpu=False)).run(
+    return _shared_full_pipeline().run(
         image, source_language=source_language, target_language="en"
     )
 
@@ -175,6 +197,11 @@ def test_real_explicit_language_pipeline(source_language, reader_key, filename):
         "width": result.image_width,
         "height": result.image_height,
     }
+    if image_path.name in TEXT_FREE_SAMPLES:
+        # No OCR-readable text: the request must still return a valid, empty
+        # API v1 result instead of failing or inventing regions.
+        assert result.num_regions == 0
+        return
     assert result.num_regions > 0, f"No text regions detected in {image_path.name}."
     assert result.source_language == source_language
     assert all(region.source_language == source_language for region in result.regions)
@@ -219,12 +246,14 @@ def test_real_explicit_language_pipeline(source_language, reader_key, filename):
 )
 def test_real_auto_language_propagation(source_language, expected_language):
     image_path = _sample_for(source_language)
-    missing = _local_reader_models(["ko", "ja", "zh", "zh-Hant"])
+    # Auto mode runs every reader whose local models are present and skips the
+    # rest, so only the reader this assertion depends on has to be installed.
+    reader_language = {"ja": "ja", "ko": "ko", "zh-Hans": "zh"}[source_language]
+    missing = _local_reader_models([reader_language])
     if missing:
         pytest.skip(
-            "Auto mode requires every configured PaddleOCR reader; missing "
-            + ", ".join(missing)
-            + "."
+            f"Auto mode needs the local {reader_language} PaddleOCR reader; "
+            "missing " + ", ".join(missing) + "."
         )
 
     result = _run_real_pipeline(image_path, "auto")

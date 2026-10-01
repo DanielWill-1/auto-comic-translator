@@ -23,8 +23,11 @@ preprocessing, OCR extraction, translation, and structured output delivery.
 | Phase 2.5.5 | Real-model integration and final backend hardening | Complete — known OCR asset gaps are documented |
 | Phase 3.1 | Chromium extension skeleton and backend connection | Complete — see `docs/ROADMAP.md` |
 | Phase 3.2 | Comic image discovery | Complete — manual Chromium verification passed |
-| Phase 3.3 | Explicit image translation round trip | Implemented — PaddleOCR 3.x compatibility fixed; HTTP verified; manual Chromium check pending |
-| Phase 3.4–3.7 | Translation queue, overlays, feed, and reliability | Planned — see `docs/ROADMAP.md` |
+| Phase 3.3 | Explicit image translation round trip | Complete — manual Chromium Alt+Click round trip verified; PaddleOCR 3.x compatibility fixed |
+| Phase 3.4 | Lazy translation queue (`IntersectionObserver`, bounded to one request) | Implemented — automated tests pass; manual Chromium verification pending |
+| Phase 3.5 | On-image overlay renderer for translated regions | Implemented — automated tests pass; manual Chromium verification pending |
+| Phase 3.6 | Translation feed (reading-order panel) and expanded chapter fixture | Implemented — automated tests pass; manual Chromium verification pending |
+| Phase 3.7 | Reliability and polish | Planned — see `docs/ROADMAP.md` |
 | Phase 4 | Advanced typesetting, chapter-wide caching, faster inference | Planned |
 
 ## Architecture
@@ -61,7 +64,7 @@ scripts/            Development / setup utilities and local benchmark
 experiments/        Prototypes, ML experiments, exploration code
 tests/              Test scripts
 docs/               architecture.md, technical_document.md, ROADMAP.md
-extension/          Chromium Manifest V3 extension (Phase 3.3 development)
+extension/          Chromium Manifest V3 extension (Phases 3.1–3.6)
 datas/              Sample comic screenshots for testing (gitignored)
 models/             Local MarianMT models (gitignored)
 ```
@@ -141,26 +144,89 @@ python scripts/download_models.py
 5. Open the Auto Comic Translator popup from the browser toolbar.
 6. Confirm the backend status shows **Backend connected**.
 
-The popup saves local preferences and checks the backend. During Phase 3.3,
-translation runs only when you Alt+Click an outlined comic candidate. This
-development-only flow uploads one image to `POST /translate` and shows a
-temporary debug result beside it; automatic translation and final overlays
-are not implemented.
+The popup saves local preferences and checks the backend.
+
+**Phase 3.3 — explicit trigger.** Alt+Click an outlined comic candidate to send
+that single image to `POST /translate` and show a temporary debug card with the
+original and translated text. Manual Chromium verification of this round trip
+passed: the extension sent `POST /translate`, the response was HTTP 200 with
+`api_version: "1"` and non-empty regions, and the debug card showed the
+original and translated text for a real Japanese sample.
+
+**Phase 3.4 — lazy translation queue.** Discovered candidates are registered
+with an `IntersectionObserver` (`rootMargin: 800px 0px`) and queued as they
+approach the viewport, so translation starts shortly before you scroll to them.
+Work is bounded to `MAX_CONCURRENT_TRANSLATIONS = 1` in
+`extension/content.js`, processed first-in-first-out, and deduplicated per
+image: an image that already succeeded, is queued, or is processing is never
+translated twice. Alt+Click remains a development trigger that reuses the same
+translation path.
+
+**Phase 3.5 — on-image overlay.** A successful result is rendered over the
+original comic image by `extension/lib/overlay-renderer.js`: one absolutely
+positioned layer per image and one element per translated region, mapped from
+the API's original-image `bbox` values onto the rectangle where the browser
+actually draws the bitmap (including `object-fit: contain`/`cover`). The bitmap
+is never modified — no canvas, no inpainting. `ResizeObserver` repositions the
+overlays when the image changes size, scrolling moves image and overlay
+together, malformed or out-of-range regions are skipped, `translation_status:
+"fallback"` regions are not drawn (the debug card still reports them), and
+translated text is always inserted as text, never as markup. The popup's
+**Show translations on image** switch hides or restores overlays without
+retranslating.
+
+**Phase 3.6 — translation feed.** `extension/lib/translation-feed.js` renders a
+collapsible panel (bottom-right **Feed** button) listing every translated image
+in DOM reading order, one entry per image with its language pair, a region
+summary, and each region's original and translated text. It is a view over the
+same stored results the overlay uses — it never OCRs, translates, or fetches
+anything — so entries appear whether or not the panel is open at translation
+time. Clicking an entry header scrolls its comic image into view; the entry for
+the image crossing the middle of the viewport is highlighted; `fallback` regions
+are marked "Translation unavailable — showing original text" instead of being
+presented as English; failures get a compact "Translation unavailable" entry
+that a later manual retry replaces in place. Changing the source language or
+backend URL invalidates overlays, feed entries, and stored results together, and
+disabling the translator removes both.
 
 ### Test image discovery
 
 From the repository root, run `python -m http.server 8080 --bind 127.0.0.1`
 and open `http://127.0.0.1:8080/dev/test-site/`. The fixture uses local sample
-images; orange outlines mark candidates. Select **Japanese** in the popup and
-Alt+Click the first Japanese sample to test a real round trip. The content
-script is limited to the exact `127.0.0.1` host. See
-[`dev/test-site/README.md`](dev/test-site/README.md) for the full manual check.
+images; orange outlines mark candidates and a dashed amber outline marks a
+queued or in-flight image. Select **Japanese** in the popup and scroll toward
+the first Japanese sample to watch it translate automatically, or Alt+Click it
+to trigger the same request manually. Translated regions are drawn over the
+image as soon as a validated result arrives. The content script is limited to
+the exact `127.0.0.1` host. See [`dev/test-site/README.md`](dev/test-site/README.md)
+for the full manual check.
 
 The Phase 3.3 backend OCR compatibility fix supports PaddleOCR 2.x and 3.x.
 A real Japanese image returned OCR regions, and a real `POST /translate`
-request returned valid API v1 JSON. The Alt+Click browser round trip still
-needs manual verification; see [`HANDOFF.md`](HANDOFF.md) for results and the
-current checkpoint.
+request returned valid API v1 JSON. Phase 3.4's browser behaviour is verified by
+the automated extension tests below; the manual Chromium scroll check is still
+pending. See [`docs/HANDOFF.md`](docs/HANDOFF.md) for results and the current
+checkpoint.
+
+### Extension tests
+
+The Phase 3.4 queue, observer, content-script wiring, the Phase 3.5 overlay
+renderer, and the Phase 3.6 feed have dependency-free tests that run on Node's
+built-in test runner. They stub the translation client, so no backend is
+contacted and no models are loaded:
+
+```bash
+node --test "tests/extension/*.test.js"
+```
+
+Coverage includes queue lifecycle and deduplication, bounded concurrency,
+failure isolation, viewport queueing, dynamic and lazy-loaded images, detached
+images, Alt+Click interaction, coordinate mapping (including non-uniform scaling
+and `object-fit`), bounds validation, overlay deduplication, resize
+repositioning, cleanup, safe text insertion, feed shell/entry rendering, reading
+order under out-of-order completion, feed navigation and active highlighting,
+settings and source invalidation, and a static inventory check of the
+`dev/test-site/` fixture.
 
 ## Usage
 
@@ -215,6 +281,33 @@ python -m backend.main
 The API accepts images up to 20 MiB and limits the full request to 21 MiB.
 Clients can send `X-Request-ID`; responses echo it for correlation. See
 [`docs/API.md`](docs/API.md) for error envelopes, readiness, and CORS behavior.
+
+`source_language=auto` runs the OCR readers whose local model files are
+installed and skips the ones that are not, so a partial local installation still
+translates instead of failing. Choosing a language explicitly stays strict and
+reports a controlled setup error when its models are missing; `GET /ready` lists
+the readers auto mode will use in `ocr_languages`. No request ever downloads a
+model.
+
+Two rules make auto mode both cheaper and more accurate:
+
+- **One pass per distinct model set.** Upstream PaddleOCR ships a single
+  `PP-OCRv6` recognizer for Japanese, Chinese, and Traditional Chinese, so
+  `ja`, `zh`, and `zh-Hant` resolve to the same files. Auto runs that model set
+  once instead of once per language. Measured on this machine with the cache
+  disabled, a Chinese sample went from 49.6 s to 15.0 s wall time (OCR 33.4 s to
+  12.6 s).
+- **The language comes from the text, not the reader.** Readers are chosen by
+  which models are installed, so the reader key is not a detection result. The
+  script of each recognized line names the language (Hangul → `ko`, kana → `ja`,
+  Han → `zh`), and a line with no identifiable script (a digit, a Latin fragment)
+  takes the page's dominant language so a short misread cannot outvote real text.
+  Before this, auto on a Chinese page reported `source_language: ja` and
+  translated with the Japanese model. Han-only text cannot distinguish Simplified
+  from Traditional Chinese and resolves to `zh`; select `zh-Hant` explicitly for
+  Traditional text.
+
+An explicit source language is never relabelled by these rules.
 
 The module launcher reads `ACT_HOST` and `ACT_PORT` (defaults:
 `127.0.0.1` and `8000`) and `ACT_MAX_CONCURRENT_INFERENCE` (default `1`).
@@ -347,8 +440,29 @@ Automated:
 - instrumentation
 
 Known verification gaps:
-- Korean real-image OCR is not yet integration-tested because the
-  local Korean PaddleOCR recognizer assets are unavailable.
-- Full real-image auto-mode verification is pending because Korean and
-  Traditional Chinese PaddleOCR recognizer assets are unavailable.
-- These are tracked validation gaps, not blockers for beginning Phase 3.
+- Korean real-image OCR and full auto-language image mode were previously
+  gated on missing local PaddleOCR assets. The Korean recognizer
+  (`PP-OCRv5_server_det` + `korean_PP-OCRv5_mobile_rec`) was installed locally on
+  2026-10-01; Korean explicit OCR, Korean auto detection, and Korean->English
+  translation now pass the opt-in integration tests on this machine.
+- Auto mode only needs the readers whose local model files are present, so a
+  partial installation still works; see `docs/API.md`. Auto resolves the source
+  language from the script of the recognized text, so Han-only pages resolve to
+  `zh` (Simplified) and Traditional Chinese should be selected explicitly.
+- `datas/korean/Screenshot 2026-09-26 015554.png` is a sound-effect panel with no
+  OCR-readable text, so it is expected to return zero regions.
+- The 13 opt-in integration tests all pass, but the file cannot run as a single
+  pytest process on this machine: after several Paddle model sets have been
+  exercised in one process, PaddleX's native inference runner faults with a
+  Windows access violation. Each test passes when it runs in its own process.
+  Run them per group, for example:
+
+  ```bash
+  python -m pytest tests/integration/test_real_pipeline.py -m integration \
+    -k "explicit_language_pipeline and ko"
+  ```
+
+  This is a native limitation of the local Paddle build, not a backend defect:
+  the served app builds its readers once and handled repeated auto requests
+  (both model families) in one process during the measurements above.
+- These are tracked validation details, not blockers for Phase 3.

@@ -10,6 +10,7 @@ const connectionCard = document.querySelector(".connection-card");
 const connectionMessage = document.querySelector("#connection-message");
 const checkButton = document.querySelector("#check-connection");
 const enabledInput = document.querySelector("#enabled");
+const showOverlaysInput = document.querySelector("#show-overlays");
 const sourceSelect = document.querySelector("#source-language");
 const displaySelect = document.querySelector("#display-mode");
 const backendForm = document.querySelector("#backend-form");
@@ -111,6 +112,7 @@ async function initialize() {
   try {
     const settings = await loadSettings();
     enabledInput.checked = settings.enabled;
+    showOverlaysInput.checked = settings.showOverlays;
     sourceSelect.value = settings.sourceLanguage;
     displaySelect.value = settings.displayMode;
     backendInput.value = settings.backendUrl;
@@ -123,6 +125,10 @@ async function initialize() {
 
 enabledInput.addEventListener("change", () => {
   persistPreference("enabled", enabledInput.checked);
+});
+
+showOverlaysInput.addEventListener("change", () => {
+  persistPreference("showOverlays", showOverlaysInput.checked);
 });
 
 sourceSelect.addEventListener("change", () => {

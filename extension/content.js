@@ -1,18 +1,47 @@
 (() => {
   const CANDIDATE_ATTRIBUTE = "data-act-comic-candidate";
+  // Phase 3.4: keep a single in-flight request. The local backend already
+  // bounds its own OCR/translation inference, so the extension must not open
+  // many simultaneous requests.
+  const MAX_CONCURRENT_TRANSLATIONS = 1;
+  // Queue images shortly before they become visible so translation can start
+  // ahead of the user's scroll position without translating the whole page.
+  const LAZY_ROOT_MARGIN = "800px 0px";
+  // Queue state -> existing development outline attribute used by content.css.
+  const IMAGE_STATE_ATTRIBUTES = Object.freeze({
+    queued: "queued",
+    processing: "translating",
+    success: "translated",
+    error: "error",
+  });
+
   const detector = globalThis.ACTImageDetector;
-  if (!detector) {
+  const queueApi = globalThis.ACTTranslationQueue;
+  const lazyObserverApi = globalThis.ACTLazyObserver;
+  const overlayRendererApi = globalThis.ACTOverlayRenderer;
+  const feedApi = globalThis.ACTTranslationFeed;
+  if (
+    !detector ||
+    !queueApi ||
+    !lazyObserverApi ||
+    !overlayRendererApi ||
+    !feedApi
+  ) {
     return;
   }
 
   const translationApi = globalThis.ACTTranslationApi;
   let enabled = false;
+  let showOverlays = true;
   let sourceLanguage = "auto";
   let backendUrl = "http://127.0.0.1:8000";
-  let observer = null;
+  let mutationObserver = null;
+  let lazyObserver = null;
+  let translationQueue = null;
+  let overlayRenderer = null;
+  let translationFeed = null;
   let processedImages = new WeakSet();
   const pendingLoadHandlers = new WeakMap();
-  const imageStates = new WeakMap();
   const debugCards = new WeakMap();
   const activeRequests = new Map();
 
@@ -20,12 +49,12 @@
     image.removeAttribute(CANDIDATE_ATTRIBUTE);
   }
 
-  function setImageState(image, state) {
-    imageStates.set(image, state);
-    if (state === "idle") {
-      image.removeAttribute("data-act-state");
+  function applyImageState(image, state) {
+    const attribute = IMAGE_STATE_ATTRIBUTES[state];
+    if (attribute) {
+      image.setAttribute("data-act-state", attribute);
     } else {
-      image.setAttribute("data-act-state", state);
+      image.removeAttribute("data-act-state");
     }
   }
 
@@ -40,8 +69,88 @@
       activeRequests.delete(image);
       activeRequest.controller.abort();
     }
+    translationQueue?.forget(image);
     removeDebugCard(image);
-    setImageState(image, "idle");
+    applyImageState(image, null);
+  }
+
+  function ensureOverlayRenderer() {
+    if (!overlayRenderer) {
+      overlayRenderer = overlayRendererApi.createOverlayRenderer({
+        onEvent: (event, detail) => {
+          console.info(`[ACT] overlay ${event}`, {
+            regionCount: detail.regionCount ?? null,
+          });
+        },
+      });
+    }
+    return overlayRenderer;
+  }
+
+  function showOverlayFor(image, result) {
+    if (!showOverlays || !result?.payload) {
+      return;
+    }
+    ensureOverlayRenderer().render(image, result.payload);
+  }
+
+  function ensureFeed() {
+    if (!translationFeed) {
+      translationFeed = feedApi.createTranslationFeed({
+        onEvent: (event, detail) => {
+          console.info(`[ACT] feed ${event}`, {
+            regionCount: detail.regionCount ?? null,
+            kind: detail.kind ?? null,
+          });
+        },
+      });
+    }
+    return translationFeed;
+  }
+
+  // The feed is a view over the same stored result the overlay uses; it never
+  // triggers its own request.
+  function publishToFeed(image, result) {
+    if (!result?.payload) {
+      return;
+    }
+    ensureFeed().update(image, result.payload);
+  }
+
+  // Re-render the stored result of an image that already succeeded (for
+  // example after the translator was disabled and enabled again).
+  function restoreTranslatedImage(image) {
+    if (!translationQueue) {
+      return;
+    }
+    const stored = translationQueue.resultOf(image);
+    if (stored?.status === "success") {
+      showOverlayFor(image, stored.result);
+      publishToFeed(image, stored.result);
+    }
+  }
+
+  // Drop every stored translation because its identity changed (source
+  // language or backend URL). Overlays, feed entries, and cached per-image
+  // results are removed together so the two views cannot diverge.
+  function invalidateTranslations(reason) {
+    for (const image of [...document.images]) {
+      releaseImage(image);
+    }
+    translationFeed?.clear();
+    console.info("[ACT] translation results invalidated", { reason });
+    discoverExistingImages();
+  }
+
+  // Release everything attached to an image that changed source or left the
+  // page: queued work, overlay layer, feed entry, resize observation, mark.
+  function releaseImage(image) {
+    cancelImage(image);
+    overlayRenderer?.remove(image);
+    translationFeed?.remove(image);
+    lazyObserver?.unobserve(image);
+    processedImages.delete(image);
+    removeCandidateMark(image);
   }
 
   function createDebugCard(image) {
@@ -77,9 +186,10 @@
     return card;
   }
 
-  function updateDebugCard(image, state, lines) {
+  function updateDebugCard(image, state, lines, mode = "manual") {
     const card = createDebugCard(image);
     card.dataset.state = state;
+    card.dataset.mode = mode;
     const header = card.firstElementChild;
     card.replaceChildren(header, ...lines);
   }
@@ -95,7 +205,28 @@
     return text.length > limit ? `${text.slice(0, limit)}…` : text;
   }
 
-  function showTranslationResult(image, result) {
+  function buildRegionList(regions) {
+    const list = document.createElement("ol");
+    list.className = "act-dev-result-list";
+    for (const region of regions.slice(0, 3)) {
+      const item = document.createElement("li");
+      item.textContent =
+        `${shorten(region.original_text)}\n→ ${shorten(region.translated_text)}\n` +
+        `Status: ${region.translation_status} · ` +
+        `Language: ${region.source_language || "unknown"}`;
+      list.append(item);
+    }
+    if (regions.length > 3) {
+      const remaining = document.createElement("li");
+      remaining.textContent = `${regions.length - 3} more regions omitted.`;
+      list.append(remaining);
+    }
+    return list;
+  }
+
+  // The Phase 3.3 development card is kept for debugging, but the overlay now
+  // shows the translation on the image, so the card is always collapsed.
+  function showTranslationResult(image, result, { mode = "auto" } = {}) {
     const { payload, requestId } = result;
     const regions = payload.regions;
     const source =
@@ -127,25 +258,20 @@
         ),
       );
     } else {
-      const list = document.createElement("ol");
-      list.className = "act-dev-result-list";
-      for (const region of regions.slice(0, 3)) {
-        const item = document.createElement("li");
-        item.textContent =
-          `${shorten(region.original_text)}\n→ ${shorten(region.translated_text)}\n` +
-          `Status: ${region.translation_status} · ` +
-          `Language: ${region.source_language || "unknown"}`;
-        list.append(item);
-      }
-      if (regions.length > 3) {
-        const remaining = document.createElement("li");
-        remaining.textContent = `${regions.length - 3} more regions omitted.`;
-        list.append(remaining);
-      }
-      lines.push(list);
+      const details = document.createElement("details");
+      details.className = "act-dev-result-details";
+      // Automatic translations stay collapsed (the overlay and feed are the
+      // reading UI); an explicit Alt+Click opens the development detail.
+      details.open = mode === "manual";
+      const summary = document.createElement("summary");
+      summary.textContent = `Show ${regions.length} region${
+        regions.length === 1 ? "" : "s"
+      }`;
+      details.append(summary, buildRegionList(regions));
+      lines.push(details);
     }
 
-    updateDebugCard(image, "translated", lines);
+    updateDebugCard(image, "translated", lines, mode);
   }
 
   function showTranslationError(image, error) {
@@ -230,30 +356,33 @@
     return blob;
   }
 
-  async function translateCandidate(image) {
+  // Shared Phase 3.3 translation path. Both the Alt+Click development trigger
+  // and the Phase 3.4 lazy queue worker call this single implementation.
+  async function translateCandidate(image, { manual = false } = {}) {
     if (!enabled || !translationApi) {
-      return;
-    }
-    if (imageStates.get(image) === "translating") {
-      return;
+      return queueApi.SKIP;
     }
 
     const request = {
       controller: new AbortController(),
     };
     activeRequests.set(image, request);
-    setImageState(image, "translating");
-    updateDebugCard(image, "translating", [
-      createCardLine(
-        "act-dev-result-status",
-        "Fetching image and translating…",
-      ),
-    ]);
+    updateDebugCard(
+      image,
+      "processing",
+      [
+        createCardLine(
+          "act-dev-result-status",
+          "Fetching image and translating…",
+        ),
+      ],
+      manual ? "manual" : "auto",
+    );
 
     try {
       const imageBlob = await fetchImageBlob(image, request.controller.signal);
       if (!enabled || activeRequests.get(image) !== request) {
-        return;
+        return queueApi.SKIP;
       }
       const result = await translationApi.translateImage({
         imageBlob,
@@ -263,34 +392,104 @@
         signal: request.controller.signal,
       });
       if (!enabled || activeRequests.get(image) !== request) {
-        return;
+        return queueApi.SKIP;
       }
 
       activeRequests.delete(image);
-      setImageState(image, "translated");
-      showTranslationResult(image, result);
+      showTranslationResult(image, result, {
+        mode: manual ? "manual" : "auto",
+      });
       console.info("[ACT] translation completed", {
         requestId: result.requestId,
         regionCount: result.payload.regions.length,
       });
+      return result;
     } catch (error) {
-      if (activeRequests.get(image) !== request || !enabled) {
-        return;
+      if (activeRequests.get(image) === request) {
+        activeRequests.delete(image);
       }
-      activeRequests.delete(image);
       if (error?.kind === "cancelled") {
-        setImageState(image, "idle");
         removeDebugCard(image);
-        return;
+        return queueApi.SKIP;
       }
-
-      setImageState(image, "error");
-      showTranslationError(image, error);
-      console.warn("[ACT] translation failed", {
-        kind: error?.kind || "unknown",
-        requestId: error?.requestId || null,
-      });
+      throw error;
     }
+  }
+
+  // Phase 3.4 queue/observer logging. Never logs image bytes, OCR text, or
+  // translated dialogue; request IDs are logged where already available.
+  function handleQueueEvent(event, detail) {
+    const image = detail.image;
+    if (!image) {
+      return;
+    }
+    applyImageState(image, detail.state);
+
+    if (event === "failed") {
+      showTranslationError(image, detail.error);
+      console.warn("[ACT] lazy translation failed", {
+        kind: detail.error?.kind || "unknown",
+        requestId: detail.error?.requestId || null,
+      });
+      return;
+    }
+
+    if (event === "reused") {
+      // Re-intersecting an already translated image must not churn the UI; an
+      // explicit Alt+Click re-shows the stored result instead.
+      if (detail.manual === true) {
+        const stored = translationQueue?.resultOf(image);
+        if (stored?.result) {
+          showTranslationResult(image, stored.result, { mode: "manual" });
+        }
+      }
+      console.info("[ACT] lazy translation reused", { state: detail.state });
+      return;
+    }
+
+    if (event === "completed") {
+      showOverlayFor(image, detail.result);
+      publishToFeed(image, detail.result);
+    }
+
+    if (event === "failed") {
+      // The feed keeps a compact placeholder so reading order stays intact; it
+      // never shows backend error text.
+      translationFeed?.updateFailed(image, detail.error);
+    }
+
+    console.info(`[ACT] lazy translation ${event}`, {
+      state: detail.state,
+      manual: detail.manual === true,
+      reason: detail.reason || null,
+    });
+  }
+
+  function isEligibleForTranslation(image) {
+    return Boolean(
+      enabled &&
+        image?.isConnected &&
+        processedImages.has(image) &&
+        image.getAttribute(CANDIDATE_ATTRIBUTE) === "true" &&
+        image.naturalWidth > 0 &&
+        image.naturalHeight > 0,
+    );
+  }
+
+  function handleNearViewport(image) {
+    if (!enabled || !translationQueue) {
+      return;
+    }
+    translationQueue.enqueue(image);
+  }
+
+  function registerCandidateForTranslation(image) {
+    if (!lazyObserver?.observe(image)) {
+      return;
+    }
+    console.info("[ACT] lazy translation observed", {
+      rootMargin: LAZY_ROOT_MARGIN,
+    });
   }
 
   function handleDocumentClick(event) {
@@ -307,7 +506,10 @@
     }
 
     event.preventDefault();
-    void translateCandidate(image);
+    // Alt+Click reuses the Phase 3.4 queue so an already translated image is
+    // re-shown, an in-flight image is not duplicated, and an errored image can
+    // be retried explicitly.
+    translationQueue?.enqueue(image, { manual: true });
   }
 
   function imageIsVisible(image) {
@@ -351,14 +553,16 @@
     processedImages.add(image);
 
     if (!result.candidate) {
+      lazyObserver?.unobserve(image);
       removeCandidateMark(image);
       return;
     }
 
-    if (!imageStates.has(image)) {
-      imageStates.set(image, "idle");
-    }
     image.setAttribute(CANDIDATE_ATTRIBUTE, "true");
+    registerCandidateForTranslation(image);
+    // A previously translated image keeps its stored result across a
+    // disable/enable cycle; re-render its overlay instead of retranslating.
+    restoreTranslatedImage(image);
     console.info("[ACT] candidate image", {
       width: image.naturalWidth,
       height: image.naturalHeight,
@@ -387,6 +591,7 @@
       cleanup();
       processedImages.add(image);
       cancelImage(image);
+      lazyObserver?.unobserve(image);
       removeCandidateMark(image);
     };
 
@@ -412,10 +617,14 @@
 
     const imagesToCheck = new Set();
     const imagesToRefresh = new Set();
+    const imagesToRelease = new Set();
     for (const record of records) {
       if (record.type === "childList") {
         for (const node of record.addedNodes) {
           collectImages(node, imagesToCheck);
+        }
+        for (const node of record.removedNodes) {
+          collectImages(node, imagesToRelease);
         }
       } else if (
         record.type === "attributes" &&
@@ -426,11 +635,21 @@
       }
     }
 
+    // A removed comic image must not leave its overlay layer, resize
+    // observation, or queued work behind.
+    for (const image of imagesToRelease) {
+      if (image.isConnected) {
+        continue;
+      }
+      releaseImage(image);
+    }
+
     for (const image of imagesToCheck) {
       if (imagesToRefresh.has(image)) {
-        cancelImage(image);
-        processedImages.delete(image);
-        removeCandidateMark(image);
+        // Lazy-loaded images swap a placeholder for the real asset. Drop the
+        // stale queue/observer/overlay state so the new source is discovered
+        // and observed again when it comes near the viewport.
+        releaseImage(image);
       }
       evaluateImage(image);
     }
@@ -443,13 +662,23 @@
   }
 
   function startDiscovery() {
-    if (observer) {
+    if (mutationObserver) {
       return;
     }
 
     enabled = true;
-    observer = new MutationObserver(handleMutations);
-    observer.observe(document.documentElement || document, {
+    translationQueue ??= queueApi.createTranslationQueue({
+      maxConcurrent: MAX_CONCURRENT_TRANSLATIONS,
+      runTask: translateCandidate,
+      isEligible: isEligibleForTranslation,
+      onEvent: handleQueueEvent,
+    });
+    lazyObserver = lazyObserverApi.createLazyObserver({
+      onEnter: handleNearViewport,
+      rootMargin: LAZY_ROOT_MARGIN,
+    });
+    mutationObserver = new MutationObserver(handleMutations);
+    mutationObserver.observe(document.documentElement || document, {
       childList: true,
       subtree: true,
       attributes: true,
@@ -460,21 +689,28 @@
 
   function stopDiscovery() {
     enabled = false;
-    observer?.disconnect();
-    observer = null;
+    mutationObserver?.disconnect();
+    mutationObserver = null;
+    lazyObserver?.disconnect();
+    lazyObserver = null;
     for (const image of activeRequests.keys()) {
       cancelImage(image);
     }
+    // Completed results are kept so re-enabling does not retranslate images
+    // that already succeeded; overlays are removed immediately and restored
+    // from those results when the translator is enabled again.
+    translationQueue?.reset({ keepResults: true });
+    overlayRenderer?.removeAll();
+    // Nothing of the reading UI stays on the page while the translator is off.
+    translationFeed?.destroy();
+    translationFeed = null;
     processedImages = new WeakSet();
     document
       .querySelectorAll(`[${CANDIDATE_ATTRIBUTE}="true"]`)
       .forEach(removeCandidateMark);
     document
       .querySelectorAll("img[data-act-state]")
-      .forEach((image) => {
-        image.removeAttribute("data-act-state");
-        imageStates.delete(image);
-      });
+      .forEach((image) => image.removeAttribute("data-act-state"));
     document
       .querySelectorAll('[data-act-debug-ui="true"]')
       .forEach((card) => card.remove());
@@ -488,13 +724,25 @@
     }
   }
 
+  function setShowOverlays(value) {
+    showOverlays = value !== false;
+    if (!showOverlays) {
+      overlayRenderer?.removeAll();
+      return;
+    }
+    // Re-render stored results instead of translating again.
+    for (const image of document.images) {
+      restoreTranslatedImage(image);
+    }
+  }
+
   let settingsRevision = 0;
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") {
       return;
     }
     if (
-      !["enabled", "sourceLanguage", "backendUrl"].some((key) =>
+      !["enabled", "sourceLanguage", "backendUrl", "showOverlays"].some((key) =>
         Object.hasOwn(changes, key),
       )
     ) {
@@ -504,15 +752,26 @@
     if (Object.hasOwn(changes, "enabled")) {
       setEnabled(changes.enabled.newValue);
     }
+    if (Object.hasOwn(changes, "showOverlays")) {
+      setShowOverlays(changes.showOverlays.newValue);
+    }
     if (Object.hasOwn(changes, "sourceLanguage")) {
       const value = changes.sourceLanguage.newValue;
-      sourceLanguage =
-        ["auto", "ja", "ko", "zh-Hans", "zh-Hant"].includes(value)
-          ? value
-          : "auto";
+      const next = ["auto", "ja", "ko", "zh-Hans", "zh-Hant"].includes(value)
+        ? value
+        : "auto";
+      if (next !== sourceLanguage) {
+        sourceLanguage = next;
+        // Stored results belong to the previous language identity.
+        invalidateTranslations("source-language");
+      }
     }
     if (Object.hasOwn(changes, "backendUrl")) {
-      backendUrl = changes.backendUrl.newValue;
+      const next = changes.backendUrl.newValue;
+      if (next !== backendUrl) {
+        backendUrl = next;
+        invalidateTranslations("backend-url");
+      }
     }
   });
 
@@ -520,6 +779,7 @@
   chrome.storage.local
     .get({
       enabled: true,
+      showOverlays: true,
       sourceLanguage: "auto",
       backendUrl: "http://127.0.0.1:8000",
     })
@@ -527,6 +787,7 @@
       if (initialRevision === settingsRevision) {
         sourceLanguage = settings.sourceLanguage || "auto";
         backendUrl = settings.backendUrl || "http://127.0.0.1:8000";
+        setShowOverlays(settings.showOverlays);
         setEnabled(settings.enabled);
       }
     })
@@ -534,6 +795,7 @@
       if (initialRevision === settingsRevision) {
         sourceLanguage = "auto";
         backendUrl = "http://127.0.0.1:8000";
+        setShowOverlays(true);
         setEnabled(true);
       }
     });

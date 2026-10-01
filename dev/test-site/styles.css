@@ -217,3 +217,55 @@ h1 {
     margin: 8px 0 0;
   }
 }
+
+/* Phase 3.6 chapter fixture additions. */
+.chapter-section {
+  margin-top: 26px;
+}
+
+.chapter-section h2 {
+  margin-top: 5px;
+  font-size: 18px;
+  letter-spacing: -0.3px;
+}
+
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-row .add-button {
+  margin-top: 16px;
+}
+
+.dynamic-reader:empty {
+  display: none;
+}
+
+.dynamic-panel {
+  border-style: dashed;
+}
+
+/* Responsive candidate: exercises ResizeObserver repositioning. */
+.responsive-image {
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+}
+
+.responsive-card.narrow .responsive-image {
+  max-width: 300px;
+}
+
+/* Narrow display: exercises translated-text wrapping in a small box. */
+.narrow-image {
+  width: 180px;
+  max-width: 100%;
+  height: auto;
+}
+
+.lazy-card img {
+  max-width: 100%;
+}

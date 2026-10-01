@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 import sys
@@ -15,6 +16,11 @@ from numpy.typing import NDArray
 from backend.config import OCR_CONFIDENCE_THRESHOLD
 
 logging.getLogger("ppocr").setLevel(logging.WARNING)
+logger = logging.getLogger("auto-comic-translator.ocr")
+
+
+class OCRSetupError(RuntimeError):
+    """No configured OCR reader can run with only locally installed models."""
 
 
 @dataclass
@@ -134,6 +140,106 @@ def _require_local_paddlex_model(model_name: str, model_directory: Path) -> None
         )
 
 
+def _paddleocr_major_version(paddleocr_module: Any) -> int:
+    version = getattr(paddleocr_module, "__version__", "")
+    try:
+        return int(version.split(".", maxsplit=1)[0])
+    except (TypeError, ValueError):
+        return 2
+
+
+# Script ranges used to label auto-mode regions when the recognizer that
+# produced them is shared by several configured languages.
+_HANGUL_PATTERN = re.compile(r"[\uac00-\ud7a3\u1100-\u11ff\u3130-\u318f]")
+_KANA_PATTERN = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff]")
+_HAN_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def _script_language(text: str) -> str | None:
+    """Best-effort language of a recognized line from the script it uses.
+
+    PaddleOCR ships one PP-OCRv6 recognizer for Japanese, Chinese, and
+    Traditional Chinese, so the reader key cannot identify the language of a
+    region produced by it. The script of the recognized text can: Hangul is
+    Korean, kana is Japanese, and Han-only text is Chinese. Han-only text cannot
+    distinguish Simplified from Traditional Chinese, so it resolves to ``zh``.
+    """
+    if _HANGUL_PATTERN.search(text):
+        return "ko"
+    if _KANA_PATTERN.search(text):
+        return "ja"
+    if _HAN_PATTERN.search(text):
+        return "zh"
+    return None
+
+
+def _reader_model_signature(lang_key: str) -> tuple[str, ...]:
+    """Identity of the local model set a language would run.
+
+    Two languages with the same signature share every model file, so running
+    both does identical work twice. Resolution is filesystem-only, matching
+    :func:`is_reader_available`: nothing is initialized and nothing is
+    downloaded. A language whose layout cannot be resolved keeps its own key as
+    the signature, so it is never merged with another language by accident.
+    """
+    try:
+        import paddleocr
+    except ImportError:
+        return (lang_key,)
+
+    paddle_lang = _PADDLE_LANG_MAP.get(lang_key, "ch")
+    try:
+        if _paddleocr_major_version(paddleocr) >= 3:
+            return _PADDLEOCR3_MODEL_NAMES.get(paddle_lang, (paddle_lang,))
+        paddleocr_module = sys.modules.get(paddleocr.PaddleOCR.__module__)
+        if paddleocr_module is None:
+            return (lang_key,)
+        return tuple(
+            str(directory)
+            for directory in _paddle_model_directories(paddleocr_module, paddle_lang)
+        )
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+        return (lang_key,)
+
+
+def is_reader_available(lang_key: str) -> bool:
+    """Report whether a language's local OCR model files are complete.
+
+    Availability is decided from the filesystem only: no reader is constructed
+    and no model download can be triggered. Errors that mean "the local layout
+    cannot be verified" are reported as unavailable so auto mode can skip the
+    reader instead of risking an implicit download. Inference errors are not
+    affected because no inference happens here.
+    """
+    try:
+        import paddleocr
+    except ImportError:
+        return False
+
+    paddle_lang = _PADDLE_LANG_MAP.get(lang_key, "ch")
+    try:
+        if _paddleocr_major_version(paddleocr) >= 3:
+            for model_name, model_directory in _paddlex_model_directories(
+                paddle_lang
+            ):
+                _require_local_paddlex_model(model_name, model_directory)
+            return True
+
+        paddleocr_module = sys.modules.get(paddleocr.PaddleOCR.__module__)
+        if paddleocr_module is None:
+            return False
+        for model_directory in _paddle_model_directories(
+            paddleocr_module, paddle_lang
+        ):
+            _require_local_paddle_model(model_directory)
+        return True
+    except FileNotFoundError:
+        return False
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+        logger.info("OCR reader %s cannot be verified locally: %s", lang_key, exc)
+        return False
+
+
 def _invoke_paddle_ocr(reader: Any, image: NDArray[np.uint8]) -> Any:
     """Use the installed reader's OCR API without masking inference errors."""
     ocr_method = reader.ocr
@@ -223,11 +329,7 @@ class OCREngine:
                 ) from e
             PaddleOCR = paddleocr.PaddleOCR
             paddle_lang = _PADDLE_LANG_MAP.get(lang_key, "ch")
-            version = getattr(paddleocr, "__version__", "")
-            try:
-                major_version = int(version.split(".", maxsplit=1)[0])
-            except (TypeError, ValueError):
-                major_version = 2
+            major_version = _paddleocr_major_version(paddleocr)
 
             if major_version >= 3:
                 model_specs = _paddlex_model_directories(paddle_lang)
@@ -290,6 +392,18 @@ class OCREngine:
                 _ = self._get_reader(lang)
         return self._readers
 
+    def available_auto_languages(self) -> list[str]:
+        """Auto-mode languages whose local OCR model files are installed.
+
+        Availability is checked from the filesystem only, so this never
+        initializes a reader and never downloads a model.
+        """
+        return [
+            lang_key
+            for lang_key in self.SUPPORTED_LANGS
+            if is_reader_available(lang_key)
+        ]
+
     def recognize(
         self,
         image: NDArray[np.uint8],
@@ -299,15 +413,37 @@ class OCREngine:
 
         start = time.perf_counter()
 
+        auto_mode = source_language is None or source_language == "auto"
         lang_keys = self._resolve_langs(source_language)
         raw_results: list[OCRResult] = []
+        # Auto-mode language evidence, collected before any label is assigned:
+        # the script of each recognized line, and the confidence it carries.
+        pending: list[tuple[str, float, list[list[int]], str | None, str]] = []
+        script_scores: dict[str, float] = {}
         ocr_engine_time_ms = 0.0
         model_load_time_ms = 0.0
+        readers_run = 0
 
         for lang_key in lang_keys:
             reader_was_loaded = lang_key in self._readers
             load_start = time.perf_counter()
-            reader = self._get_reader(lang_key)
+            try:
+                reader = self._get_reader(lang_key)
+            except FileNotFoundError as exc:
+                if not auto_mode:
+                    # An explicitly requested language keeps a clear setup error
+                    # instead of silently returning empty OCR output, and it is
+                    # reported as a controlled 503 rather than a generic 500.
+                    raise OCRSetupError(
+                        f"No local OCR model files are available for "
+                        f"source_language={lang_key!r}: {exc}. Requests do not "
+                        f"download models."
+                    ) from exc
+                logger.info(
+                    "auto OCR: reader %s has no local models; skipping", lang_key
+                )
+                continue
+            readers_run += 1
             if not reader_was_loaded:
                 model_load_time_ms += (time.perf_counter() - load_start) * 1000
             ocr_start = time.perf_counter()
@@ -320,19 +456,42 @@ class OCREngine:
                 if len(text) < 1:
                     continue
                 points = [[int(pt[0]), int(pt[1])] for pt in bbox_points]
-                # In auto mode, preserve which reader produced this result.
-                # The caller's request value is not a detection result.
-                detected_language = (
-                    lang_key
-                    if source_language in (None, "auto")
-                    else source_language
-                )
-                raw_results.append(OCRResult(
-                    text=text,
-                    confidence=round(float(conf), 4),
-                    bbox=points,
-                    language=detected_language,
-                ))
+                script_language = _script_language(text) if auto_mode else None
+                if script_language is not None:
+                    script_scores[script_language] = (
+                        script_scores.get(script_language, 0.0) + float(conf)
+                    )
+                pending.append((text, float(conf), points, script_language, lang_key))
+
+        if auto_mode and readers_run == 0:
+            raise OCRSetupError(
+                "No local OCR readers are available for auto mode. Install the "
+                "local PaddleOCR model assets; requests never download models."
+            )
+
+        # In auto mode the reader key is not a detection result: readers are
+        # chosen by which local models are installed, and one PP-OCRv6 recognizer
+        # serves ja/zh/zh-Hant. The script of the recognized text names the
+        # language. A line with no identifiable script (digits, Latin, symbols —
+        # typically a sound effect or a stray mark) takes the page's dominant
+        # script language, so a short misread cannot outvote the real text and
+        # flip the page's language. An explicit selection is never changed.
+        page_language = (
+            max(script_scores, key=lambda key: (script_scores[key], key))
+            if script_scores
+            else None
+        )
+        for text, conf, points, script_language, lang_key in pending:
+            if auto_mode:
+                detected_language = script_language or page_language or lang_key
+            else:
+                detected_language = source_language
+            raw_results.append(OCRResult(
+                text=text,
+                confidence=round(conf, 4),
+                bbox=points,
+                language=detected_language,
+            ))
 
         results = self._deduplicate(raw_results)
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -355,8 +514,52 @@ class OCREngine:
 
     def _resolve_langs(self, source_language: str | None) -> list[str]:
         if source_language is None or source_language == "auto":
-            return self.SUPPORTED_LANGS
+            return self._auto_lang_keys()
         return [source_language]
+
+    def _auto_lang_keys(self) -> list[str]:
+        """Auto mode uses every locally installed reader and skips the rest.
+
+        A reader whose local model files are missing is skipped instead of
+        failing the request, because implicit downloads are disabled. An
+        explicit language selection is not affected by this method.
+
+        Each distinct local model set runs once: ja, zh, and zh-Hant share one
+        PP-OCRv6 recognizer, so running all three produces identical text three
+        times over. Regions from such a reader are labelled from the script of
+        the recognized text instead of from the reader key.
+        """
+        available = self.available_auto_languages()
+        skipped = [
+            lang_key
+            for lang_key in self.SUPPORTED_LANGS
+            if lang_key not in available
+        ]
+        if skipped:
+            logger.info(
+                "auto OCR: skipping readers without local models: %s",
+                ", ".join(skipped),
+            )
+        if not available:
+            raise OCRSetupError(
+                "No local OCR readers are available for auto mode. Install the "
+                "local PaddleOCR model assets; requests never download models."
+            )
+
+        unique: list[str] = []
+        signatures: set[tuple[str, ...]] = set()
+        for lang_key in available:
+            signature = _reader_model_signature(lang_key)
+            if signature in signatures:
+                logger.info(
+                    "auto OCR: %s shares a local model set with an earlier "
+                    "reader; running those models once",
+                    lang_key,
+                )
+                continue
+            signatures.add(signature)
+            unique.append(lang_key)
+        return unique
 
     @staticmethod
     def _deduplicate(results: list[OCRResult]) -> list[OCRResult]:

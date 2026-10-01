@@ -36,7 +36,7 @@
         <div class="setting-row toggle-row">
           <div class="setting-copy">
             <label for="enabled">Translator</label>
-            <p>Alt+Click an outlined comic image on the local test page.</p>
+            <p>Outlined comic images translate as they near the viewport. Alt+Click one to translate it manually.</p>
           </div>
           <label class="switch" aria-label="Enable translator preference">
             <input id="enabled" type="checkbox">
@@ -61,6 +61,17 @@
           <label for="display-mode">Preferred display</label>
           <select id="display-mode"></select>
           <p class="field-hint">Saved preference for a later phase.</p>
+        </div>
+
+        <div class="setting-row toggle-row">
+          <div class="setting-copy">
+            <label for="show-overlays">Show translations on image</label>
+            <p>Draw translated text over the comic as you read.</p>
+          </div>
+          <label class="switch" aria-label="Show translations on image">
+            <input id="show-overlays" type="checkbox">
+            <span class="switch-track" aria-hidden="true"></span>
+          </label>
         </div>
       </section>
 
