@@ -263,18 +263,77 @@ Optional:
 - DOM image detection
 - Automatic processing
 - Overlay rendering
-- Chapter-wide translation
+- Lazy per-image translation queue and reading-order translation feed (chapter-level state is planned for Phase 4)
 
-### Phase 4 — Advanced Features
+### Phase 4 — Advanced Reading Quality (planned)
 
-- AI typesetting
-- Community cache
-- Improved layout reconstruction
-- Faster inference
+- Smart typesetting: adaptive font size, wrapping, alignment, and bounds handling
+- Speech-bubble / text-area detection to recover the usable area around a region
+- Panel detection and reading-order reconstruction, language-aware
+- Chapter/session state layered over the existing local cache
+- Advanced performance work, benchmarked before adoption
+- Context-aware local translation using limited nearby dialogue
+- Native-looking rendering that masks source text in simple cases
+
+### Phase 5 — Productization and General Release (planned)
+
+- Production packaging and backend lifecycle management
+- Model manager with explicit, user-triggered local model installation
+- First-run setup with no developer terminal
+- Production extension UX and browser distribution
+- Versioned updates, security/privacy audit, compatibility testing, release docs
+
+Milestone detail, completion definitions, and transition rules live in
+[`ROADMAP.md`](ROADMAP.md). Phase 4 and Phase 5 are planned only; no
+implementation method is fixed by this document.
 
 ---
 
-## 11. Risks & Limitations
+## 11. Future Architecture Direction
+
+The Phase 3 architecture is the current, implemented shape. Phase 4 and Phase 5
+change how much the system understands and how it is delivered, not what the
+local-first constraint allows. The conceptual evolution is:
+
+```text
+Phase 3 (implemented)
+
+Browser page
+  → discovery
+  → local API
+  → OCR
+  → translation
+  → overlay / feed
+
+
+Phase 4 (planned)
+
+Browser page
+  → chapter/session model
+  → image / layout analysis
+  → OCR
+  → reading-order reconstruction
+  → context-aware translation
+  → smart typesetting / source-text cleanup
+
+
+Phase 5 (planned)
+
+Installed application
+  ├── backend lifecycle manager
+  ├── local models (managed installation)
+  ├── cache
+  └── browser extension
+```
+
+No technology choices are locked in here. The packaging mechanism, the
+background/companion process shape, and any runtime or quantization change are
+Phase 4/5 decisions that must be evaluated and benchmarked first; milestone
+detail is in [`ROADMAP.md`](ROADMAP.md).
+
+---
+
+## 12. Risks & Limitations
 
 - Stylized fonts may reduce OCR accuracy.
 - OCR errors propagate into translations.
@@ -285,10 +344,11 @@ Optional:
 
 ---
 
-## 12. Security & Privacy
+## 13. Security & Privacy
 
 - Local processing by default.
 - No server-side storage.
 - No image uploads required.
-- User API keys stored locally.
+- Optional provider API keys, if any are ever added, stay local and are never
+  required.
 - Cached data remains on user device.

@@ -28,9 +28,36 @@ performance claim. The first request means the first request in that process;
 model load is reported separately and it is not an operating-system cold-start
 measurement.
 
-Korean and Chinese translation model files are present, and the Korean Marian
-translation-only check passed. Korean image measurements are unavailable
-because its local PaddleOCR recognition files are missing. Auto-mode timings
-are also unavailable because auto mode needs all configured OCR readers,
-including the missing Korean and Traditional Chinese assets. No values are
-inferred for those runs.
+## Auto mode (measured 2026-10-01)
+
+Auto mode, cache disabled, CPU only, one observed run per sample:
+
+| Sample | Resolved language | Regions | Wall | OCR | Translation |
+|---|---|---:|---:|---:|---:|
+| Japanese 436 × 654 | `ja` | 2 | 27.7 s | 16.9 s | 10.7 s |
+| Chinese, simplified 829 × 472 | `zh` | 4 | 15.0 s | 12.6 s | 2.5 s |
+| Korean 451 × 335 | `ko` | 3 | 7.9 s | 5.4 s | 2.5 s |
+
+Before auto mode ran one pass per distinct local model set, the same Chinese
+sample took 49.6 s wall with 33.4 s in OCR: the shared `PP-OCRv6` recognizer was
+run once for each of `ja`, `zh`, and `zh-Hant`. Auto remains slower than an
+explicit language because it still runs every installed model family (here the
+`PP-OCRv6` set and the Korean `PP-OCRv5` set).
+
+## Phase 4.5 baseline
+
+Phase 4.5 (advanced performance) continues to report cold request, warm request,
+cache hit, auto mode, and explicit language separately. The two tables in this
+document are the baseline that any candidate optimization — translation
+batching across regions, persistent warm models, preprocessing reuse, parallel
+preprocessing, and evaluated (not adopted) quantization, ONNX, or GPU execution
+— must beat. No optimization is adopted without a measurement.
+
+Korean and Chinese translation model files are present, and the Korean
+translation and image checks now pass: the Korean recognizer
+(`PP-OCRv5_server_det` + `korean_PP-OCRv5_mobile_rec`) was installed locally on
+2026-10-01, so the Korean row in the first table can be filled in when that
+scenario is next measured. Auto mode no longer requires every configured reader
+to be present — it runs the readers whose local model files exist and skips the
+rest — so auto timings are available and are reported in the section above.
+No values are inferred for runs that were not performed.

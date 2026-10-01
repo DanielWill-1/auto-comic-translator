@@ -161,15 +161,13 @@ eventually show translated text. Work is split into these milestones:
 3. **3.3 First image-to-backend integration** [x] — explicitly send one
    selected image to the existing API v1 and handle its translated regions.
    Manual Chromium verification passed (see the record below).
-4. **3.4 Lazy translation queue** [~] — queue images near the viewport with
-   `IntersectionObserver` and bounded work. Implemented with automated
-   coverage; manual Chromium verification pending.
-5. **3.5 Overlay renderer** [~] — place translated regions over their source
-   image using the original-image coordinate contract. Implemented with
-   automated coverage; manual Chromium verification pending.
-6. **3.6 Translation feed** [~] — provide a scrollable original-and-translation
-   view in reading order. Implemented with automated coverage; manual Chromium
-   verification pending.
+4. **3.4 Lazy translation queue** [x] — queue images near the viewport with
+   `IntersectionObserver` and bounded work. Manual Chromium verification passed.
+5. **3.5 Overlay renderer** [x] — place translated regions over their source
+   image using the original-image coordinate contract. Manual Chromium
+   verification passed.
+6. **3.6 Translation feed** [x] — provide a scrollable original-and-translation
+   view in reading order. Manual Chromium verification passed.
 7. **3.7 Reliability and polish** [ ] — improve failure handling, settings,
    accessibility, and browser compatibility.
 
@@ -374,9 +372,395 @@ real-model integration tests pass (run per group, see
 prevents a single-process run on this machine).
 
 Phase status: **3.3 COMPLETE — MANUAL VERIFICATION PASSED** ·
-**3.4 IMPLEMENTED — MANUAL VERIFICATION PENDING** ·
-**3.5 IMPLEMENTED — MANUAL VERIFICATION PENDING** ·
-**3.6 IMPLEMENTED — MANUAL VERIFICATION PENDING**.
+**3.4 COMPLETE — MANUAL VERIFICATION PASSED** ·
+**3.5 COMPLETE — MANUAL VERIFICATION PASSED** ·
+**3.6 COMPLETE — MANUAL VERIFICATION PASSED** (all recorded 2026-10-01).
+Phase 3.7 (reliability and polish) is planned and not started.
+
+### Phase 3.4–3.6 manual verification record
+
+The project owner ran the Phase 3.4, 3.5, and 3.6 checks in
+[`../dev/test-site/README.md`](../dev/test-site/README.md) in Chromium with the
+unpacked extension loaded and reported no issues (2026-10-01): progressive
+translation as images approach the viewport, overlays drawn over the source
+regions and following the image on resize, the feed panel listing translated
+images in page order, feed navigation and highlighting, and no retranslation on
+repeat scroll or Alt+Click. Automated coverage for the same behaviour: 86
+extension tests, 102 backend tests, and 13 opt-in real-model integration tests.
+
+## Project trajectory
+
+```text
+Phase 1   — Core OCR + translation prototype          [x]
+Phase 2   — Comic processing pipeline                 [x]
+Phase 2.5 — Backend hardening                         [x]
+Phase 3   — Chromium extension MVP                    [~]
+            3.1 Extension shell + backend connection   [x]
+            3.2 Comic image discovery                  [x]
+            3.3 First image → backend integration      [x]
+            3.4 Lazy translation queue                 [x]
+            3.5 Overlay renderer                       [x]
+            3.6 Translation feed                       [x]
+            3.7 Reliability / performance / polish     [ ] planned
+Phase 4   — Advanced reading quality                  [ ] planned
+Phase 5   — Productization and general release         [ ] planned
+```
+
+```text
+PHASE 3   "It works as a browser extension."
+              ↓
+PHASE 4   "It reads and looks like a genuinely good comic translation experience."
+              ↓
+PHASE 5   "Anyone can install it and use it without being a developer."
+```
+
+Milestone detail for Phase 4 and Phase 5 follows. Everything in those two phases
+is **planned only** — no Phase 4 or Phase 5 work has started, and this document
+does not commit to any implementation that has not been chosen and benchmarked.
+
+## Phase 4 — Advanced Reading Quality [ ]
+
+The purpose of Phase 4 is not to add more features. It is to improve how well
+translated comics are understood, how naturally translations are placed, how
+smoothly chapters are processed, and how close the result feels to a proper
+translated manga/manhwa reader.
+
+It builds on the stable Phase 3 path —
+
+```text
+discover image → lazy queue → OCR → translate → result → overlay → feed
+```
+
+— and improves the **quality** of that experience rather than its shape.
+
+### Milestone 4.1 — Smart Typesetting [ ]
+
+- **Solves:** the translated line is drawn into the OCR box with one fixed style,
+  so longer English overflows or clips and sits unevenly inside the bubble.
+- **Planned:** treat the OCR region as an available text area and fit the text
+  into it — adaptive font sizing with minimum/maximum bounds, line wrapping,
+  centering and vertical alignment, padding, expansion when English is longer
+  than the source text, keeping text inside the image, avoiding overlap between
+  neighbouring regions, narrow-bubble and long-translation handling, better
+  contrast and readability, and configurable overlay styling.
+- **Out of scope:** image inpainting, replacing source artwork, manual per-page
+  layout tools. 4.1 stays DOM/browser rendering and must not require inpainting.
+- **Next:** 4.2, which provides a better available area to typeset into.
+
+### Milestone 4.2 — Speech Bubble / Text Area Detection [ ]
+
+- **Solves:** OCR bounding boxes hug the glyphs, so the renderer has far less
+  room than the bubble actually offers — and English usually needs more space
+  than Japanese, Korean, or Chinese source text.
+- **Planned:** from an OCR region, identify the surrounding speech bubble or text
+  area and typeset inside it. Techniques to investigate first, simplest first:
+  thresholding, contour detection, connected components, white-region detection,
+  shape analysis, classical OpenCV/Pillow processing. A machine-learning detector
+  is evaluated only if classical methods prove insufficient.
+- **Out of scope:** mandating a heavyweight ML detector at this stage, and
+  inpainting.
+- **Next:** 4.3.
+
+### Milestone 4.3 — Panel Detection and Reading-Order Reconstruction [ ]
+
+- **Solves:** regions are ordered by geometry alone, which does not match how a
+  page is actually read, so overlays and the feed can present text out of story
+  order.
+- **Planned:** a processing hierarchy of page → panels → bubbles/text areas →
+  OCR regions → reading order; panel detection, bubble and text-region grouping,
+  reading-order heuristics, layout graphs, language-aware ordering (Japanese
+  manga right-to-left and top-to-bottom, webtoon/manhwa vertical progression),
+  and using the reconstructed order in both the overlay and the translation feed.
+- **Out of scope:** defining a final algorithm. This milestone is exploratory
+  until it has been measured against real pages.
+- **Next:** 4.4.
+
+### Milestone 4.4 — Chapter / Session Architecture [ ]
+
+- **Solves:** work is per image, so a chapter has no shared state: progress is
+  lost on reload, images can be processed again, and cache reuse is incidental.
+- **Planned:** a chapter/session model holding ordered images, processed and
+  unprocessed state, translation results, source/target languages, image hashes
+  and cache identities, progress, failures, session lifecycle, and
+  revisit/reload behaviour — with chapter navigation, progress persistence, and
+  better cache reuse as the visible benefits.
+- **Out of scope:** accounts, cloud sync, server-side chapter storage. This
+  builds on the existing backend SQLite cache and extension session state rather
+  than replacing them.
+- **Next:** 4.5.
+
+### Milestone 4.5 — Advanced Performance Optimization [ ]
+
+- **Solves:** CPU-only inference makes a realistic chapter slow, and work is
+  repeated unnecessarily (preprocessing, one translation call per region, cold
+  model loads).
+- **Planned evaluation areas:** OCR preprocessing optimization, translation
+  batching across OCR regions, persistent warm models, CPU/GPU execution options,
+  model quantization, ONNX or other runtime options, parallel preprocessing, a
+  cheaper auto-language mode, image-preprocessing reuse, and chapter-level
+  scheduling.
+- **Out of scope:** committing to ONNX, quantization, GPU inference, or another
+  runtime. These are candidates; any optimization must be benchmarked before
+  adoption. Performance documentation keeps reporting cold request, warm
+  request, cache hit, auto mode, and explicit language separately.
+- **Next:** 4.6.
+
+### Milestone 4.6 — Context-Aware Local Translation [ ]
+
+- **Solves:** each region is translated in isolation, so pronouns, sentences split
+  across bubbles, names, honorifics, and repeated terms drift between bubbles.
+- **Planned experiments:** translating with limited nearby context (previous
+  bubble → current bubble → next bubble, or the previous N regions), consistent
+  character terminology, and better handling of punctuation and sentence
+  continuation across bubbles.
+- **Out of scope:** cloud or paid translation APIs, and rewriting the rest of the
+  pipeline. Local-first is a hard constraint, and no specific model change is
+  promised at this stage.
+- **Next:** 4.7.
+
+### Milestone 4.7 — Native-Looking Comic Rendering / Text Cleanup [ ]
+
+- **Solves:** English is drawn on top of the source text, so both remain visible
+  and the page reads as an annotation rather than a translated comic.
+- **Planned:** detect text/bubble → remove or mask the source text → reconstruct
+  the background → render the translation. Start with simple cases (a plain white
+  speech bubble cleared and re-drawn cleanly) and only later investigate complex
+  backgrounds. Candidate techniques: solid-colour cleanup, local background
+  estimation, classical inpainting, and optionally ML-based inpainting.
+- **Out of scope:** generative/AI inpainting as a requirement.
+- **Next:** Phase 4 completion review.
+
+### Phase 4 order
+
+```text
+4.1 Smart Typesetting
+        ↓
+4.2 Bubble / Text Area Detection
+        ↓
+4.3 Panel + Reading Order
+        ↓
+4.4 Chapter / Session Architecture
+        ↓
+4.5 Advanced Performance
+        ↓
+4.6 Context-Aware Translation
+        ↓
+4.7 Native-Looking Rendering
+```
+
+This is the intended dependency order, not a claim that the milestones are
+independent: 4.4 and 4.5 may partially overlap earlier milestones when real
+performance findings require it.
+
+### What "Phase 4 complete" means [ ]
+
+Phase 4 is complete when the extension reliably provides an advanced reading
+experience in which:
+
+```text
+comic images are detected
+        ↓
+translations occur progressively
+        ↓
+text regions are grouped and order-aware
+        ↓
+translations use useful surrounding layout
+        ↓
+English is typeset intelligently
+        ↓
+chapter state is preserved and reused
+        ↓
+performance is acceptable on realistic chapters
+        ↓
+local translation can use limited dialogue context
+        ↓
+source text can be cleanly replaced or visually suppressed in supported cases
+```
+
+This does **not** mean the product is ready for arbitrary users. That is Phase 5.
+
+### What Phase 4 is not
+
+Phase 4 is not cloud hosting, comic distribution, content hosting, an account
+system, a social platform, DRM bypass, an automated scraping service, or a
+commercial translation-API dependency. The project remains a user-side comic
+translation tool.
+
+### Local-first principle
+
+```text
+local OCR · local translation · local cache · local image processing
+```
+
+No paid or cloud provider becomes mandatory in Phase 4 or Phase 5. Optional
+external providers may remain a possible future extension only when a user
+explicitly configures them, and they are not part of the Phase 4 core plan.
+
+## Phase 5 — Productization and General Release [ ]
+
+Phase 5 means the product is functionally done and a normal user can install and
+use it. It is not primarily about new research features: it takes the mature
+Phase 4 system and makes it safe, installable, understandable, maintainable, and
+releasable.
+
+By the end of Phase 5, a non-developer should not need to clone the repository,
+install Python, run `uvicorn`, run a local file server, edit source files, know
+where Paddle models live, use DevTools, or understand OCR model internals.
+
+### Milestone 5.1 — Production Packaging [ ]
+
+- **Goal:** package the local backend and its runtime so users do not configure a
+  Python environment by hand.
+- **Planned:** Windows installer, self-contained Python runtime or packaged
+  executable, backend executable, dependency packaging, a versioned application
+  directory, and uninstall support.
+- **Out of scope:** choosing the final packaging technology.
+- **Next:** 5.2.
+
+### Milestone 5.2 — Backend Lifecycle Management [ ]
+
+- **Goal:** the user never runs `python.exe -m uvicorn backend.main:app`.
+- **Planned:** start, stop, restart, crash detection, and health checking for the
+  local backend, with a likely shape of desktop/background companion app →
+  local backend → browser extension.
+- **Out of scope:** fixing the final architecture; this is a Phase 5
+  implementation decision.
+- **Next:** 5.3.
+
+### Milestone 5.3 — Model Setup / Model Manager [ ]
+
+- **Goal:** a safe, explicit way to obtain the local OCR and translation models.
+- **Planned:** a model inventory that reports per-language state (Japanese
+  installed, Chinese installed, Korean missing, Traditional Chinese missing),
+  disk-space estimates, download progress, checksum/integrity verification,
+  repair/reinstall, and removal of unused models, driven by an explicit user
+  action.
+- **Out of scope:** silent downloads during a translation request — that stays
+  forbidden, as it is today.
+- **Next:** 5.4.
+
+### Milestone 5.4 — First-Run Setup [ ]
+
+- **Goal:** a guided first-run experience with no developer terminal.
+- **Planned:** welcome → choose languages → install local models → verify backend
+  → install/connect the browser extension → test translation → ready.
+- **Out of scope:** automated account or cloud onboarding.
+- **Next:** 5.5.
+
+### Milestone 5.5 — Production Extension UX [ ]
+
+- **Goal:** the Phase 3 extension UI is development/MVP quality; Phase 5 makes it
+  a product UI.
+- **Planned:** finalize popup, settings, error states, accessibility, status,
+  onboarding, feed, overlays, language controls, and model-readiness information;
+  hide development/debug UI from normal users while keeping optional developer
+  diagnostics behind a deliberate debug mode.
+- **Out of scope:** new translation features.
+- **Next:** 5.6.
+
+### Milestone 5.6 — Browser Distribution [ ]
+
+- **Goal:** normal installation and distribution.
+- **Planned:** Chrome Web Store and Chromium-compatible targets with a manual
+  signed/unpacked fallback for development; review manifest permissions, CSP,
+  packaging, icons and assets, privacy disclosure, versioning, and the extension
+  update strategy.
+- **Out of scope:** claiming store availability before it exists.
+- **Next:** 5.7.
+
+### Milestone 5.7 — Installer / Application Updates [ ]
+
+- **Goal:** defined update behaviour across components.
+- **Planned:** version and compatibility rules for the backend version, extension
+  version, model version, and cache schema version, so an update cannot silently
+  corrupt a cache or mismatch the API contract.
+- **Out of scope:** automatic silent major-version upgrades.
+- **Next:** 5.8.
+
+### Milestone 5.8 — Security / Privacy Release Audit [ ]
+
+- **Goal:** a formal audit before general release.
+- **Planned:** loopback backend exposure, CORS, request limits, extension
+  permissions, model downloads, cache contents, logs, optional provider keys if
+  any ever exist, dependency vulnerabilities, filesystem permissions, and update
+  integrity.
+- **Out of scope:** any change that would make the product cloud-dependent by
+  default; it remains local-first.
+- **Next:** 5.9.
+
+### Milestone 5.9 — Compatibility Testing [ ]
+
+- **Goal:** tested behaviour on realistic sites and environments.
+- **Planned matrix:** Windows 10 and Windows 11; Chrome, Edge, and other
+  Chromium browsers where feasible; Japanese manga, Chinese manhua, Korean
+  manhwa, webtoon long-strip layouts, traditional page layouts, dynamic readers,
+  and lazy-loaded sites.
+- **Out of scope:** claiming support for anything untested.
+- **Next:** 5.10.
+
+### Milestone 5.10 — Release Documentation [ ]
+
+- **Goal:** everything a user or future maintainer needs before Phase 5
+  completion.
+- **Planned:** installation guide, first-run guide, troubleshooting, model
+  storage information, privacy explanation, supported languages, known
+  limitations, performance expectations, uninstall instructions, and developer
+  documentation.
+- **Out of scope:** marketing material.
+- **Next:** Phase 5 completion review.
+
+### What "Phase 5 complete" means [ ]
+
+A normal user can use Auto Comic Translator without development knowledge:
+
+```text
+download/install application
+        ↓
+guided model setup
+        ↓
+install extension
+        ↓
+backend starts automatically
+        ↓
+open comic page
+        ↓
+extension detects comic
+        ↓
+translation works
+        ↓
+overlay/feed works
+        ↓
+cache works
+        ↓
+clear errors when something is unavailable
+        ↓
+application can be updated/uninstalled normally
+```
+
+No terminal is required for ordinary operation, no Python commands are run by
+hand, no model directories are located manually, and no repository checkout is
+required.
+
+## Phase transition rules
+
+### Phase 3 → Phase 4
+
+Phase 4 implementation does not begin until:
+
+```text
+3.7 reliability work finished
+overlay ownership stable
+lazy queue stable
+feed stable
+real Chromium verification complete
+major Phase 3 regression tests passing
+```
+
+### Phase 4 → Phase 5
+
+Product packaging does not begin until the advanced reader itself is stable.
+Phase 4 completion establishes the feature and reading-quality foundation; Phase
+5 then packages and releases it.
 
 ## Privacy and out of scope
 
@@ -384,5 +768,8 @@ Phase status: **3.3 COMPLETE — MANUAL VERIFICATION PASSED** ·
   cloud inference, or paid translation providers.
 - Broader API tests and browser-extension implementation remain separate
   milestones above.
-- AI typesetting, speech-bubble inpainting, hosted translation, and cloud
-  deployment remain out of scope.
+- Smart typesetting, speech-bubble/text-area detection, panel and reading-order
+  reconstruction, and source-text cleanup are **planned** Phase 4 milestones
+  (4.1–4.3, 4.7), not out-of-scope work.
+- Hosted/cloud translation, cloud deployment, content hosting, and any account
+  system remain out of scope.

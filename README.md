@@ -24,11 +24,32 @@ preprocessing, OCR extraction, translation, and structured output delivery.
 | Phase 3.1 | Chromium extension skeleton and backend connection | Complete — see `docs/ROADMAP.md` |
 | Phase 3.2 | Comic image discovery | Complete — manual Chromium verification passed |
 | Phase 3.3 | Explicit image translation round trip | Complete — manual Chromium Alt+Click round trip verified; PaddleOCR 3.x compatibility fixed |
-| Phase 3.4 | Lazy translation queue (`IntersectionObserver`, bounded to one request) | Implemented — automated tests pass; manual Chromium verification pending |
-| Phase 3.5 | On-image overlay renderer for translated regions | Implemented — automated tests pass; manual Chromium verification pending |
-| Phase 3.6 | Translation feed (reading-order panel) and expanded chapter fixture | Implemented — automated tests pass; manual Chromium verification pending |
+| Phase 3.4 | Lazy translation queue (`IntersectionObserver`, bounded to one request) | Complete — manual Chromium verification passed |
+| Phase 3.5 | On-image overlay renderer for translated regions | Complete — manual Chromium verification passed |
+| Phase 3.6 | Translation feed (reading-order panel) and expanded chapter fixture | Complete — manual Chromium verification passed |
 | Phase 3.7 | Reliability and polish | Planned — see `docs/ROADMAP.md` |
-| Phase 4 | Advanced typesetting, chapter-wide caching, faster inference | Planned |
+| Phase 4 | Advanced reading quality (typesetting, bubble/panel layout, chapter state, context-aware translation, native-looking rendering) | Planned — see `docs/ROADMAP.md` |
+| Phase 5 | Productization and general release (packaging, model manager, first-run setup, store distribution) | Planned — see `docs/ROADMAP.md` |
+
+### Where this is going
+
+```text
+Phase 3   "It works as a browser extension."
+              ↓
+Phase 4   "It reads and looks like a genuinely good comic translation experience."
+              ↓
+Phase 5   "Anyone can install it and use it without being a developer."
+```
+
+Phase 3 builds the functional browser-extension MVP. Phase 4 focuses on advanced
+reading quality — how well translations are understood, how naturally they are
+placed, and how smoothly chapters are processed. Phase 5 turns the mature project
+into a distributable product for normal users: packaged install, guided model
+setup, and no terminal.
+
+Milestone detail, completion definitions, transition rules, and the local-first
+constraint are in [`docs/ROADMAP.md`](docs/ROADMAP.md). Phases 4 and 5 are
+planned only; nothing in them is implemented yet.
 
 ## Architecture
 

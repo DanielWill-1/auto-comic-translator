@@ -1,2371 +1,1353 @@
-# Auto Comic Translator — Phase 3.7 Reliability, Performance, and Browser Polish
+# Auto Comic Translator — Phase 4 + Phase 5 Planning
 
-We are now implementing:
+We are doing a DOCUMENTATION-ONLY planning pass.
 
-# Phase 3.7 — Reliability and Polish
+# IMPORTANT: DO NOT IMPLEMENT PHASE 4
 
-Do NOT begin Phase 4.
+Do NOT write Phase 4 production code.
 
-Do NOT redesign the project.
+Do NOT create Phase 4 modules.
 
-Preserve the working Phase 1–3.6 architecture.
+Do NOT modify backend or extension behavior.
 
-This phase should primarily:
+Do NOT add dependencies.
 
-1. fix remaining real-browser correctness bugs;
-2. significantly improve perceived and actual translation speed where safely possible;
-3. harden overlay/image ownership;
-4. improve queue prioritization;
-5. improve settings/error handling;
-6. finish browser usability/accessibility polish;
-7. verify the complete extension end-to-end in real Chromium.
+Do NOT change APIs.
 
----
-
-# CURRENT PROJECT STATE
-
-Existing architecture now includes:
-
-```text
-Phase 3.1
-Extension shell + backend connection
-
-Phase 3.2
-Comic image discovery
-
-Phase 3.3
-Manual Alt+Click translation
-
-Phase 3.4
-IntersectionObserver + lazy translation queue
-
-Phase 3.5
-Responsive image overlays
-
-Phase 3.6
-Translation feed
-```
-
-The current pipeline is approximately:
-
-```text
-image discovered
-    ↓
-observed
-    ↓
-near viewport
-    ↓
-translation queue
-    ↓
-content script
-    ↓
-service worker
-    ↓
-POST /translate
-    ↓
-FastAPI
-    ↓
-OCR
-    ↓
-translation
-    ↓
-result stored
-   ↙       ↘
-overlay    feed
-```
-
-Do not duplicate any of these systems.
-
----
-
-# CURRENT TEST STATUS
-
-Recent automated verification:
-
-```text
-node --test "tests/extension/*.test.js"
-86 passed, 0 failed
-
-pytest -q
-95 passed, 15 skipped
-
-compileall backend scripts tests
-OK
-
-node --check
-all extension/test JS parsed
-
-git diff --check
-clean
-```
-
-Do not regress this.
-
----
-
-# IMPORTANT ENVIRONMENT SPLIT
-
-There are currently TWO Python/Paddle environments.
-
-## Project venv
-
-```text
-PaddleOCR 2.9.1
-models under ~/.paddleocr/whl
-available OCR roughly: ja + zh
-Korean recognizer unavailable
-```
-
-Behavior:
-
-```text
-explicit ja → 200
-auto → 200
-explicit ko → controlled 503 OCR_READERS_UNAVAILABLE
-```
-
-## Global Python 3.11
-
-```text
-PaddleOCR 3.7
-PaddleX 3.7.x
-models under ~/.paddlex/official_models
-```
-
-More OCR languages are available there, including the Korean configuration previously tested.
-
-Do NOT merge these environments or silently download models.
-
-Do NOT change dependency versions merely to make tests pass.
-
-Maintain compatibility with the project's existing 2.x/3.x OCR support.
-
----
-
-# PRIMARY REAL-BROWSER BUG
-
-There is still a serious overlay ownership/layout defect.
-
-Observed behavior:
-
-```text
-Image 1 translated
-        ↓
-some translated boxes appear spatially near Image 2
-or later in the document
-```
-
-In the real fixture, overlays associated with one manga page can visibly appear beside another page instead of remaining entirely attached to their source image.
-
-THIS MUST BE FIXED FIRST.
-
-Do not attempt to solve this with:
-
-```css
-left: -500px;
-transform: translateX(...);
-```
-
-or other magic offsets.
-
-The invariant must be:
-
-```text
-one image
-    ↓
-one translation identity
-    ↓
-one overlay owner
-    ↓
-only that image's regions
-```
-
----
-
-# PART A — REPOSITORY AUDIT
-
-Before changing code, inspect the actual current implementation.
-
-At minimum:
-
-```text
-extension/content.js
-extension/content.css
-extension/manifest.json
-
-extension/lib/image-detector.js
-extension/lib/lazy-observer.js
-extension/lib/translation-queue.js
-extension/lib/translation-api.js
-extension/lib/overlay-renderer.js
-extension/lib/translation-feed.js
-
-extension/background.js
-extension/popup/*
-
-backend/main.py
-backend/ocr.py
-backend/pipeline.py
-backend/full_pipeline.py
-backend/cache.py
-backend/translate.py
-backend/config.py
-
-tests/extension/
-tests/
-
-docs/API.md
-docs/PERFORMANCE.md
-docs/ROADMAP.md
-docs/HANDOFF.md
-dev/test-site/
-```
-
-Report the real current architecture before modifying it.
-
-Do not work from assumptions from older handoffs.
-
----
-
-# PART B — FIX CROSS-IMAGE OVERLAY OWNERSHIP
-
-This is the highest-priority correctness issue.
-
-Investigate whether any of these are currently possible:
-
-```text
-overlay node reused for another image
-result stored under wrong image key
-DOM-order index used as identity
-image reference changed after async completion
-overlay container shared by images
-stale async request writes after src change
-source change does not invalidate renderer
-settings invalidation leaves renderer ownership stale
-ResizeObserver callback uses stale image/result
-translation completion captures mutable loop variable
-feed ordering accidentally reused as overlay identity
-```
-
-Find the ACTUAL cause.
-
----
-
-# B1. Identity must never be based only on index
-
-Do NOT identify images using only:
-
-```text
-Image 1
-Image 2
-Image 3
-```
-
-or:
-
-```javascript
-document.images[index]
-```
-
-Indexes can change when dynamic images are inserted/removed.
-
-DOM order is useful for DISPLAY ORDER.
-
-It must not be used as the canonical translation owner.
-
-Use the actual image DOM element plus translation identity.
-
----
-
-# B2. Define canonical per-image translation identity
-
-Each active result should be associated with something conceptually equivalent to:
-
-```text
-DOM image element
-+
-resolved image source identity
-+
-source language
-+
-target language
-+
-backend URL
-```
-
-For example:
-
-```javascript
-{
-    element,
-    sourceKey,
-    sourceLanguage,
-    targetLanguage,
-    backendUrl
-}
-```
-
-You do not have to implement that exact structure.
-
-Use the simplest architecture compatible with current code.
-
----
-
-# B3. Protect against stale async completion
-
-Critical race:
-
-```text
-Image A queued
-    ↓
-request running
-    ↓
-image src changes / settings change / state reset
-    ↓
-old request completes
-    ↓
-OLD result must NOT render
-```
-
-Every async translation completion must verify that it still belongs to the current image identity.
-
-Use the existing epoch/generation mechanism if Phase 3.4 already has one.
-
-If not sufficient, strengthen it.
-
-Conceptually:
-
-```javascript
-const generationAtStart = state.generation;
-
-await translate();
-
-if (state.generation !== generationAtStart) {
-    discardResult();
-}
-```
-
-Do not render stale results.
-
----
-
-# B4. Overlay owner
-
-There must be exactly:
-
-```text
-0 or 1 overlay root
-```
-
-per translated image element.
-
-Use something like:
-
-```javascript
-WeakMap<HTMLImageElement, OverlayState>
-```
-
-if appropriate.
-
-The state may contain:
-
-```text
-overlayElement
-resizeObserver
-translationIdentity
-result
-```
-
-A renderer call for Image A must never retrieve Image B's overlay root.
-
----
-
-# B5. Overlay containment
-
-Each translation region must exist inside the overlay associated with its own image.
-
-Example:
-
-```html
-Image A
-└── Overlay A
-    ├── Region A1
-    └── Region A2
-
-Image B
-└── Overlay B
-    ├── Region B1
-    └── Region B2
-```
-
-Never:
-
-```html
-Shared Overlay
-├── A1
-├── A2
-├── B1
-└── B2
-```
-
-unless the renderer has rock-solid per-image viewport coordinate isolation.
-
-Prefer image-local containment.
-
----
-
-# B6. Debug cards must not affect ownership
-
-The existing:
-
-```text
-ACT Translation Debug
-```
-
-cards are inserted below images.
-
-They must not:
-
-```text
-become the anchor for overlays
-change which image an overlay belongs to
-change the overlay origin
-shift overlay state to the next sibling
-```
-
-Explicitly test:
-
-```text
-Image A
-Debug Card A
-Image B
-```
-
-Overlay A must remain on Image A.
-
----
-
-# B7. Dynamic DOM regression
-
-Test:
-
-```text
-Image A
-Image B
-Image C
-```
-
-translate A and B.
-
-Then insert:
-
-```text
-Image X
-```
-
-before B.
-
-Expected:
-
-```text
-Overlay A remains on A
-Overlay B remains on B
-```
-
-Only feed numbering/order may change.
-
-Overlay ownership must not.
-
----
-
-# B8. Removal regression
-
-Translate:
-
-```text
-A
-B
-C
-```
-
-Remove B.
-
-Expected:
-
-```text
-A overlay remains correct
-C overlay remains correct
-B overlay cleaned
-```
-
-No overlay migration.
-
----
-
-# B9. Duplicate source regression
-
-The fixture deliberately contains two `<img>` elements with the same source.
-
-Example:
-
-```text
-Image A -> manga.png
-Image B -> manga.png
-```
-
-Backend result content may be reusable.
-
-But:
-
-```text
-overlay A belongs to A
-overlay B belongs to B
-```
-
-They must be separate DOM renderers even if the API result object is shared.
-
----
-
-# PART C — FIX GEOMETRY ROBUSTNESS
-
-Even after ownership is fixed, preserve these invariants.
-
-For every image:
-
-```text
-overlay origin = visual image content origin
-overlay width = visual image content width
-overlay height = visual image content height
-```
-
-Translated bbox positions must remain image-local.
-
----
-
-# C1. Never use document order for coordinates
-
-Region coordinate mapping must depend only on:
-
-```text
-API source dimensions
-displayed image/content dimensions
-that image's own visual rect
-```
-
-Never:
-
-```text
-previous image height
-number of previous images
-feed index
-debug card height
-page scroll offset
-```
-
----
-
-# C2. Resize stability
-
-ResizeObserver callbacks must update only their associated image.
-
-Explicitly test:
-
-```text
-resize Image A
-```
-
-does NOT mutate:
-
-```text
-Overlay B
-Overlay C
-```
-
----
-
-# C3. Source-change stability
-
-When image source changes:
-
-```text
-remove old overlay
-invalidate result
-retranslate new source
-create new overlay
-```
-
-Old region DOM must never survive on the new source.
-
----
-
-# PART D — PERFORMANCE PROFILING FIRST
-
-The extension currently feels slow.
-
-Do NOT immediately start changing model architecture or concurrency.
-
-Measure where the time is actually spent.
-
-The backend already returns detailed timing information.
-
-Use it.
-
-Collect representative timings for:
-
-```text
-first request after process start
-warm uncached request
-backend cache hit
-Auto language
-explicit Japanese
-```
-
-For each, capture existing timing fields corresponding to:
-
-```text
-request decode
-preprocessing
-OCR model loading
-OCR inference
-grouping
-translation model loading
-translation inference
-cache lookup/write
-semaphore wait
-serialization
-total
-```
-
-Also measure browser-side stages:
-
-```text
-image fetch
-blob creation
-message dispatch
-service-worker handling
-network round trip
-response validation
-overlay rendering
-feed update
-```
-
-Do NOT log actual comic text.
-
----
-
-# D1. Produce a before-optimization profile
-
-Create a compact report similar to:
-
-```text
-Explicit Japanese, first request
-total: ...
-model load: ...
-OCR: ...
-translation: ...
-queue wait: ...
-
-Explicit Japanese, warm
-total: ...
-
-cache hit
-total: ...
-```
-
-Do not optimize blindly.
-
----
-
-# PART E — SPEED: ELIMINATE REDUNDANT REQUESTS
-
-Review all paths that can issue translation.
-
-There must be no duplicates caused by:
-
-```text
-IntersectionObserver re-entry
-MutationObserver re-discovery
-Alt+Click while lazy request active
-feed interaction
-overlay resize
-settings refresh
-debug-card rerender
-source observer callback
-responsive layout
-duplicate queue pump
-```
-
-For one image identity:
-
-```text
-one active request maximum
-```
-
----
-
-# E1. In-flight request coalescing
-
-If two consumers request the SAME translation identity while it is processing:
-
-```text
-lazy queue
-+
-manual Alt+Click
-```
-
-they should await/reuse the same in-flight promise/result rather than issue two backend requests.
-
-Do not only reject one request if that prevents its UI from receiving the eventual result.
-
-Prefer:
-
-```text
-same identity
-→ one backend request
-→ multiple consumers notified
-```
-
-where practical.
-
----
-
-# PART F — SESSION RESULT REUSE
-
-Backend SQLite cache already handles persistent result caching, but the extension can avoid unnecessary browser work too.
-
-Within the current page/session, consider a small translation-result cache keyed by:
-
-```text
-resolved image source
-source language
-target language
-backend URL
-```
-
-This is especially useful for the duplicate-source fixture.
-
-If:
-
-```text
-Image A
-Image B
-```
-
-have the same exact resolved image source and translation identity:
-
-Image B may reuse Image A's successful API result.
-
-It still needs:
-
-```text
-its own overlay
-its own feed entry
-```
-
-but does not necessarily need:
-
-```text
-another fetch
-another upload
-another backend request
-```
-
----
-
-# F1. Be conservative
-
-Only reuse results when identity is clearly equivalent.
-
-Do NOT reuse by:
-
-```text
-filename alone
-DOM index
-alt text
-dimensions alone
-```
-
-A resolved URL/session identity is acceptable as an optimization.
-
-If correctness is uncertain, fall back to backend processing.
-
----
-
-# PART G — QUEUE PRIORITY FOR PERCEIVED SPEED
-
-Current queue is FIFO with concurrency 1.
-
-This is safe, but with a chapter-like fixture it can feel slow because an image farther away can block the one the user is actually looking at.
-
-Improve pending queue prioritization.
-
-Do NOT break bounded concurrency.
-
----
-
-# G1. Priority model
-
-Pending, NOT-YET-STARTED images may be prioritized approximately:
-
-```text
-1. currently visible image
-2. image just below viewport / likely next reading image
-3. image slightly above viewport
-4. farther prefetch candidates
-```
-
-Do not cancel an OCR request already executing just because another image becomes visible.
-
-Only reprioritize pending work.
-
----
-
-# G2. Reading direction
-
-For normal vertical comic reading:
-
-prefer images below the viewport over equally distant images above it.
-
-Keep this simple.
-
-No complex prediction model.
-
----
-
-# G3. Current visible image must not wait behind many prefetched images
-
-Example:
-
-```text
-Queue:
-A 800px above
-B 500px below
-C visible now
-```
-
-Before processing begins or when choosing next:
-
-```text
-C
-B
-A
-```
-
-is preferable.
-
----
-
-# G4. Preserve concurrency
-
-Do NOT simply change:
-
-```text
-MAX_CONCURRENT_TRANSLATIONS = 1
-```
-
-to a huge number.
-
-The backend already protects synchronous inference with a semaphore.
-
-Sending many requests merely causes:
-
-```text
-browser network congestion
-extra blobs in memory
-backend semaphore waits
-worse responsiveness
-```
-
-Keep concurrency 1 unless profiling and explicit safety testing prove 2 gives a real benefit.
-
----
-
-# PART H — TEST CONCURRENCY = 2 EXPERIMENTALLY, NOT BY DEFAULT
-
-Because the backend currently serializes expensive inference, browser concurrency >1 may provide little benefit.
-
-Perform an isolated benchmark:
-
-```text
-extension concurrency 1
-vs
-extension concurrency 2
-```
-
-Measure:
-
-```text
-time-to-current-image
-chapter throughput
-backend queue wait
-memory
-error rate
-```
-
-Only increase the default if there is a clear measured improvement and backend inference remains safe.
-
-Otherwise keep:
-
-```text
-MAX_CONCURRENT_TRANSLATIONS = 1
-```
-
-Document the benchmark.
-
----
-
-# PART I — REDUCE EXPENSIVE IMAGE FETCH WORK
-
-Inspect:
-
-```javascript
-fetch(image.currentSrc || image.src)
-```
-
-path.
-
-Ensure image data is not fetched more than once unnecessarily for the same active translation identity.
-
-If the image is already being translated:
-
-reuse the in-flight work.
-
-If a successful same-source result exists in session cache:
-
-reuse it.
-
-Do NOT fetch blobs repeatedly for:
-
-```text
-overlay rerender
-feed rendering
-resize
-scroll
-```
-
----
-
-# PART J — BACKEND MODEL REUSE
-
-Verify that OCR and Marian model instances remain cached/reused between requests.
-
-They must NOT be recreated every image.
-
-Confirm from actual code.
-
-Add instrumentation/test coverage if necessary.
-
-Expected:
-
-```text
-first request
-model load expensive
-
-later request
-model load ≈ 0
-```
-
-If the same model is being reconstructed repeatedly, fix that.
-
----
-
-# PART K — FIRST-REQUEST LATENCY
-
-The first real translation may naturally be slower due to model loading.
-
-Improve perceived behavior without violating local-first design.
-
-Possible safe improvements:
-
-```text
-show "Loading local OCR model…"
-show "Translating…"
-```
-
-instead of appearing frozen.
-
-If there is already a lightweight local initialization mechanism that can safely warm the selected model AFTER explicit user enabling, evaluate it.
-
-But:
-
-Do NOT make `/health` load models.
-
-Do NOT make `/ready` unexpectedly load models.
-
-Do NOT download models.
-
-Do NOT introduce expensive startup work unless measured benefit justifies it.
-
-Prefer keeping lazy loading and clearly communicating first-load state.
-
----
-
-# PART L — CACHE FAST PATH
-
-Verify backend cache lookup happens before expensive model loading/inference wherever possible.
-
-A cache hit should not initialize OCR/translation models just to return an already-cached result.
-
-Existing historical behavior already targeted zero inference on cache hit.
-
-Ensure recent code has not regressed this.
-
-Benchmark:
-
-```text
-same image + same settings
-```
-
-second request should be dramatically faster.
-
----
-
-# PART M — AUTO MODE PERFORMANCE
-
-Auto mode can inherently be slower because more than one locally available OCR reader may run.
-
-Measure:
-
-```text
-explicit Japanese
-vs
-Auto on Japanese
-```
-
-Do not hide this.
-
-If Auto is significantly slower because multiple OCR readers execute:
-
-document that.
-
-Only optimize if you can preserve detection correctness.
-
-Do NOT create a weak heuristic that guesses a language solely to make benchmarks look faster.
-
----
-
-# PART N — EXTENSION UI PROGRESS STATES
-
-Improve visible state feedback.
-
-Each candidate image should have clear lightweight state:
-
-```text
-queued
-translating
-translated
-failed
-```
-
-Do not flood the page with debug cards.
-
-Possible subtle indicator:
-
-```text
-small border / badge
-```
-
-during development.
-
-Normal users should not need the large ACT debug card.
-
----
-
-# N1. Debug card policy
-
-Recommended:
-
-```text
-automatic translation
-→ no large debug card
-
-Alt+Click/manual debug
-→ detailed debug card
-```
-
-Keep developer diagnostics available.
-
-This will also reduce DOM noise and page length.
-
----
-
-# PART O — TRANSLATION FEED POLISH
-
-The Phase 3.6 feed works.
-
-Improve only reliability/usability.
-
-Do not redesign it.
-
-Check:
-
-```text
-entry never belongs to wrong image
-DOM order updates correctly
-dynamic images insert correctly
-removed images disappear
-settings invalidation updates entries
-same-source duplicate has two separate feed entries
-```
-
-Feed index is presentation only.
-
-Never use feed index as canonical overlay identity.
-
----
-
-# PART P — ERROR HANDLING
-
-All extension errors should have useful structured output.
-
-Never:
-
-```text
-[object Object]
-```
-
-Normalize:
-
-```text
-message
-code
-status
-requestId
-```
-
-Do not expose comic text or unnecessary filesystem details.
-
----
-
-# P1. User-facing messages
-
-Examples:
-
-Backend offline:
-
-```text
-Local translator is unavailable.
-Start the Auto Comic Translator backend.
-```
-
-Missing local OCR:
-
-```text
-OCR model for Korean is not installed locally.
-```
-
-Timeout:
-
-```text
-Translation timed out.
-```
-
-Keep technical details in development logs.
-
----
-
-# PART Q — BACKEND OFFLINE RECOVERY
-
-If backend is stopped:
-
-```text
-current image fails
-```
-
-The queue must not spam repeated requests.
-
-When the backend becomes available later:
-
-manual retry must work.
-
-A future image should also be able to process normally.
-
-Do not permanently poison the entire session.
-
----
-
-# PART R — SETTINGS POLISH
-
-Review popup settings.
-
-At minimum ensure clean support for:
-
-```text
-enabled
-source language
-backend URL
-```
-
-If existing implementation already supports target language, preserve it.
-
-Potential Phase 3.7 additions only if they remain small:
-
-```text
-Show overlays
-Show translation feed
-```
-
-Do not build a large settings page.
-
----
-
-# R1. Settings identity changes
-
-These must invalidate translation identity where appropriate:
-
-```text
-source language
-target language
-backend URL
-```
-
-Visual-only settings such as:
-
-```text
-feed visible
-overlay visible
-```
-
-must NOT cause backend retranslation.
-
----
-
-# PART S — OVERLAY VISIBILITY TOGGLE
-
-If straightforward, expose:
-
-```text
-Show translations on images
-```
-
-Default:
-
-```text
-on
-```
-
-Turning it off:
-
-```text
-hide/remove rendered overlays
-```
-
-but preserve successful results.
-
-Turning it back on:
-
-```text
-rerender from stored result
-```
-
-with:
-
-```text
-ZERO new /translate request
-```
-
----
-
-# PART T — FEED VISIBILITY
-
-Similarly:
-
-```text
-Show translation feed
-```
-
-may control whether the feed button/panel is available.
-
-Changing feed visibility must not invalidate translation results.
-
----
-
-# PART U — MEMORY / CLEANUP
-
-Long comic chapters can contain many images.
-
-Audit:
-
-```text
-WeakMap usage
-WeakSet usage
-ResizeObservers
-IntersectionObservers
-MutationObserver
-AbortControllers
-event listeners
-feed references
-overlay DOM
-debug-card references
-```
-
-Removed images must not be kept alive unnecessarily.
-
----
-
-# U1. Overlay cleanup
-
-When an image leaves the DOM permanently:
-
-```text
-disconnect its ResizeObserver
-remove its overlay
-remove feed entry
-release strong references
-```
-
----
-
-# PART V — MUTATIONOBSERVER PERFORMANCE
-
-A broad:
-
-```text
-documentElement
-subtree: true
-```
-
-MutationObserver can become expensive on busy sites.
-
-Profile it.
-
-Do NOT rescan:
-
-```javascript
-document.images
-```
-
-on every unrelated DOM mutation.
-
-Prefer processing:
-
-```text
-newly-added nodes
-changed img src/srcset
-```
-
-incrementally.
-
-If current code already does this efficiently, leave it alone.
-
----
-
-# V1. Debounce only where needed
-
-Do not add random 500ms delays.
-
-If mutations arrive in bursts, a microtask or short batched rescan can be acceptable.
-
-Measure before/after.
-
----
-
-# PART W — INTERSECTIONOBSERVER PERFORMANCE
-
-Ensure each image is observed only once per relevant identity.
-
-Do not repeatedly:
-
-```text
-observe
-unobserve
-observe
-```
-
-without a source/settings reason.
-
-Check the expanded 13-candidate fixture.
-
----
-
-# PART X — TEST SITE PERFORMANCE PANEL
-
-Enhance the development fixture with a SMALL diagnostics section if useful.
-
-Possible counters:
-
-```text
-Candidates
-Queued
-Processing
-Translated
-Failed
-Backend requests
-Cache hits
-```
-
-This must be development-only.
-
-It can make real Chromium verification easier.
-
-Do NOT couple production extension behavior to this fixture.
-
----
-
-# PART Y — PERFORMANCE DEBUG LOGGING
-
-Add optional concise development logs such as:
-
-```text
-[ACT perf]
-image=3
-fetch=12ms
-backend=1580ms
-render=4ms
-cache=false
-```
-
-Do not include:
-
-```text
-OCR text
-translated text
-image bytes
-full image URL if privacy-sensitive
-```
-
-Use index/internal debug ID only.
-
----
-
-# PART Z — AUTOMATED REGRESSION TESTS
-
-Add extensive tests for the real bugs.
-
----
-
-## Z1. Cross-image ownership
-
-Create:
-
-```text
-Image A
-Image B
-```
-
-Return different known results.
-
-Assert:
-
-```text
-A text only exists inside Overlay A
-B text only exists inside Overlay B
-```
-
----
-
-## Z2. Async reverse completion
-
-Requests:
-
-```text
-A begins
-B begins/queued
-```
-
-Resolve responses in an unusual order where architecture permits.
-
-Verify no ownership swap.
-
----
-
-## Z3. DOM insertion
-
-Translate A/B.
-
-Insert X before B.
-
-A/B overlay ownership unchanged.
-
----
-
-## Z4. DOM removal
-
-Translate A/B/C.
-
-Remove B.
-
-A and C unchanged.
-
----
-
-## Z5. Same source twice
-
-A/B share URL.
-
-If session reuse occurs:
-
-```text
-backend request count may be 1
-```
-
-but:
-
-```text
-overlay count = 2
-feed entries = 2
-```
-
----
-
-## Z6. Stale source completion
-
-Start translation.
-
-Change src before response resolves.
-
-Resolve old request.
-
-Assert:
-
-```text
-old result discarded
-old overlay absent
-```
-
----
-
-## Z7. Settings race
-
-Start Auto translation.
-
-Change to Japanese before completion.
-
-Old Auto completion must not render over Japanese state.
-
----
-
-## Z8. Resize isolation
-
-Resize A.
-
-Only A overlay recalculates.
-
----
-
-## Z9. Debug-card isolation
-
-Add/remove debug card A.
-
-Overlay B unchanged.
-
----
-
-## Z10. Session cache
-
-Translate same identity twice on distinct elements.
-
-Verify result reuse if implemented.
-
----
-
-## Z11. In-flight coalescing
-
-Lazy translation + Alt+Click simultaneously.
-
-Exactly one backend request.
-
-Both paths receive final state.
-
----
-
-## Z12. Queue prioritization
-
-Candidates:
-
-```text
-far above
-near below
-visible
-```
-
-Verify next job is:
-
-```text
-visible
-```
-
-then near below.
-
----
-
-## Z13. Pending reprioritization
-
-Queue several images.
-
-Scroll so another pending candidate becomes visible.
-
-Ensure it moves ahead of farther pending candidates.
-
----
-
-## Z14. Cache hit
-
-Mock cached backend response.
-
-Ensure no unnecessary extra extension processing/request.
-
----
-
-## Z15. Toggle overlays
-
-Disable overlay display.
-
-No request.
-
-Enable again.
-
-Stored result rerenders.
-
-No request.
-
----
-
-## Z16. Disable extension
-
-All visual extension UI removed/hidden.
-
-Queue stopped safely.
-
----
-
-# AA — PERFORMANCE BENCHMARK SCRIPT / REPORT
-
-Reuse:
-
-```text
-scripts/benchmark.py
-```
-
-where appropriate.
-
-Do not create a second redundant backend benchmark if one exists.
-
-Run representative Japanese cases.
-
-Record:
-
-```text
-cold
-warm uncached
-cache hit
-```
-
-Also create extension-side timing observations using the real fixture.
-
-Document before/after numbers in:
-
-```text
-docs/PERFORMANCE.md
-```
-
-Do not claim improvement without measured numbers.
-
----
-
-# AB — PERFORMANCE TARGET
-
-Do NOT promise arbitrary sub-second OCR.
-
-Instead optimize measurable overhead.
-
-Goals:
-
-```text
-cache hit feels effectively immediate
-warm request has minimal extension overhead
-visible image is prioritized
-no redundant requests
-no unnecessary blob fetches
-model reused
-overlay/feed rendering negligible relative to OCR
-```
-
-For first-request model loading:
-
-clearly indicate progress rather than appearing frozen.
-
----
-
-# AC — REAL CHROMIUM VERIFICATION
-
-This is mandatory for Phase 3.7 completion.
-
-Previous phases still have:
-
-```text
-manual Chromium verification pending
-```
-
-Use this phase to finally close that gap.
-
-Start backend and fixture normally.
-
-Reload unpacked extension.
-
-Use current real expanded test site.
-
----
-
-# AC1. Explicit Japanese
-
-Select Japanese.
-
-Scroll through all Japanese pages.
-
-Verify:
-
-```text
-correct image gets correct overlay
-no overlay jumps to next image
-feed entry matches same image
-visible image gets priority
-no duplicate backend request
-```
-
----
-
-# AC2. Adjacent-image regression
-
-This specifically targets the screenshot bug.
-
-Use two Japanese images stacked sequentially:
-
-```text
-Image A
-Image B
-```
-
-Translate both.
-
-Explicitly confirm:
-
-```text
-every A overlay element lies within A
-every B overlay element lies within B
-```
-
-Scroll between them repeatedly.
-
-Resize browser.
-
-No crossover.
-
----
-
-# AC3. 13-candidate chapter test
-
-Scroll naturally from top to bottom.
-
-Verify queue does not translate the whole chapter unnecessarily ahead of you.
-
-Visible/next image should take priority.
-
----
-
-# AC4. Feed mapping
-
-Click each feed entry.
-
-Confirm it goes to the image containing that entry's overlay.
-
-This is an excellent ownership sanity check.
-
----
-
-# AC5. Same-source duplicate
-
-Confirm:
-
-```text
-two image DOM elements
-two overlay sets
-two feed entries
-```
-
-and inspect request count.
-
-If session reuse implemented:
-
-prefer one backend translation.
-
----
-
-# AC6. Responsive fixture
-
-Toggle responsive width.
-
-Overlays stay attached.
-
-No backend request.
-
----
-
-# AC7. Narrow fixture
-
-Ensure translated boxes remain readable and attached to the narrow image.
-
----
-
-# AC8. Dynamic insertion
-
-Add several images.
-
-No existing overlay moves to another image.
-
-New images translate normally.
-
----
+Do NOT run model experiments.
 
-# AC9. Remove dynamic image
+Do NOT implement speech-bubble detection.
 
-Remove one translated image.
+Do NOT implement new OCR logic.
 
-Its overlay/feed entry disappear.
+Do NOT implement inpainting.
 
-Other images remain untouched.
+Do NOT implement new translation models.
 
----
-
-# AC10. Lazy source replacement
-
-Change placeholder to real image.
-
-No stale placeholder result.
-
-Correct new overlay appears.
-
----
-
-# AC11. Auto mode
+Do NOT begin Phase 5 implementation.
 
-Verify Japanese sample with:
+The task is ONLY to update project documentation so the future development direction is clearly defined.
 
-```text
-Auto
-```
-
-Confirm 200 and correct overlay ownership.
-
 ---
 
-# AC12. Missing Korean in venv
-
-Using the venv intentionally:
-
-```text
-explicit Korean
-```
+# CURRENT PROJECT STRUCTURE
 
-should produce:
+The project currently progresses roughly as:
 
 ```text
-503 OCR_READERS_UNAVAILABLE
-```
-
-with clean extension UX.
-
-No overlay.
-
-No repeated request storm.
-
----
-
-# AC13. Backend offline
-
-Stop backend.
+Phase 1
+Core OCR + translation prototype
 
-Bring one new image near viewport.
+Phase 2
+Comic processing / pipeline
 
-One clean failure.
+Phase 2.5
+Backend hardening
 
-No loop.
+Phase 3
+Chromium extension
 
-Restart backend.
-
-Manual retry / subsequent image works.
-
----
-
-# AC14. Speed measurements
-
-Record actual user-visible times for:
-
-```text
-cold Japanese
-warm Japanese
-cache hit
-same-source reuse if implemented
+3.1 Extension shell + backend connection
+3.2 Comic image discovery
+3.3 First image → backend integration
+3.4 Lazy translation queue
+3.5 Overlay renderer
+3.6 Translation feed
+3.7 Reliability / performance / browser polish
 ```
-
-Include browser-side and backend timing.
 
----
-
-# AD — ACCESSIBILITY BASICS
-
-Phase 3.7 should finish basic accessibility polish.
-
-Check:
+Phase 3 should remain focused on delivering a stable extension MVP.
 
-```text
-feed open/close buttons
-popup controls
-overlay toggle
-feed toggle
-debug controls
-```
+Phase 4 should represent:
 
-Ensure:
-
 ```text
-real button elements
-keyboard focus
-aria labels where needed
-visible focus behavior
-```
-
-Do not attempt full WCAG certification.
-
----
-
-# AE — CSS ISOLATION
-
-Audit extension CSS for overly broad selectors.
-
-Do not style page elements globally using selectors such as:
-
-```css
-img {}
-button {}
-section {}
+ADVANCED READING QUALITY
 ```
 
-All extension styles should be scoped to:
+Phase 5 should represent:
 
 ```text
-act-
+PRODUCT COMPLETE / READY FOR GENERAL USERS
 ```
-
-classes/data attributes.
 
-The extension must not break arbitrary host pages.
-
 ---
-
-# AF — Z-INDEX
 
-Use a small intentional z-index hierarchy.
+# PRIMARY GOAL
 
-Example:
+Update the documentation so the project has a clear roadmap through:
 
 ```text
-image overlay
-feed panel
-development debug UI
-```
+Phase 3 → stable extension MVP
 
-Do not use arbitrary:
+Phase 4 → advanced manga/manhwa reading quality
 
-```css
-z-index: 2147483647;
+Phase 5 → finished distributable product that normal users can install and use
 ```
-
-everywhere.
 
-Avoid covering site navigation unnecessarily.
+Do not implement any of these future milestones.
 
 ---
-
-# AG — FINAL DEBUG CARD CLEANUP
-
-Large debug cards are no longer appropriate for every automatic request.
-
-Change normal mode to:
-
-```text
-no debug card
-```
-
-or extremely compact status.
-
-Keep detailed debug output for:
 
-```text
-Alt+Click
-development mode
-```
-
-This should make the fixture substantially cleaner and reduce DOM overhead.
-
----
+# FILES TO REVIEW
 
-# AH — DOCUMENTATION
+Inspect the repository first.
 
-Update:
+At minimum review:
 
 ```text
 README.md
 docs/ROADMAP.md
 docs/HANDOFF.md
+docs/technical_document.md
+docs/architecture.md
+docs/API.md
 docs/PERFORMANCE.md
 dev/test-site/README.md
 ```
 
-Include:
+Use the actual existing filenames/casing.
 
-```text
-overlay ownership architecture
-queue prioritization behavior
-session dedup/reuse behavior
-performance measurements
-environment split
-real Chromium verification record
-known missing OCR assets
-settings/toggles
-```
+Do not create duplicate documentation if an appropriate document already exists.
+
+Only modify documents that genuinely need Phase 4 / Phase 5 planning information.
 
 ---
 
-# AI — PHASE STATUS
+# PART A — DEFINE PHASE 4
 
-Do NOT mark earlier manual verification complete merely because automated tests pass.
+Add a clearly documented:
 
-After real Chromium verification, record truthful status.
+# Phase 4 — Advanced Reading Quality
 
-Target:
+The purpose of Phase 4 is NOT simply "add more features."
+
+Its purpose is to improve:
 
 ```text
-3.1 [x]
-3.2 [x]
-3.3 [x]
-3.4 [x]
-3.5 [x]
-3.6 [x]
-3.7 [x]
+how well translated comics are understood
+how naturally translations are placed
+how smoothly chapters are processed
+how close the result feels to a proper translated manga/manhwa reader
 ```
 
-Only if the browser tests actually pass.
-
-If not:
+Phase 4 should build on the stable Phase 3 pipeline:
 
 ```text
-3.7 IMPLEMENTED — MANUAL VERIFICATION PENDING
+discover image
+→ lazy queue
+→ OCR
+→ translate
+→ result
+→ overlay
+→ feed
+```
+
+and improve the QUALITY of that experience.
+
+---
+
+# PHASE 4 MILESTONES
+
+Document the following milestones.
+
+Do not implement them.
+
+---
+
+# 4.1 — Smart Typesetting
+
+Goal:
+
+Improve the current basic translated-text overlay so English text is placed more naturally and readably.
+
+Current Phase 3 concept:
+
+```text
+OCR bbox
+→ translated text box
+```
+
+Phase 4.1 should evolve toward:
+
+```text
+OCR region
+→ available text area
+→ appropriate font size
+→ wrapping
+→ alignment
+→ collision/bounds handling
+→ readable translation
+```
+
+Potential future work:
+
+- adaptive font sizing;
+- line wrapping;
+- text centering;
+- vertical alignment;
+- padding;
+- minimum/maximum font sizes;
+- expansion when English is longer than source text;
+- keeping translated text inside the image;
+- avoiding region overlap;
+- handling narrow bubbles;
+- handling long translations;
+- better contrast/readability;
+- configurable overlay styling.
+
+Explicitly note:
+
+Phase 4.1 is still DOM/browser rendering.
+
+It should NOT require image inpainting yet.
+
+---
+
+# 4.2 — Speech Bubble / Text Area Detection
+
+Goal:
+
+Move beyond using only OCR text bounding boxes.
+
+Desired future pipeline:
+
+```text
+OCR region
+    ↓
+identify surrounding speech bubble / text area
+    ↓
+use larger available area
+    ↓
+typeset translation inside that area
+```
+
+Potential techniques to investigate:
+
+```text
+thresholding
+contour detection
+connected components
+white-region detection
+shape analysis
+classical OpenCV/Pillow processing
+```
+
+Machine-learning-based detection may be evaluated later if classical methods are insufficient.
+
+Do not mandate a heavyweight ML detector at this planning stage.
+
+Document that this milestone should first attempt the simplest reliable approach.
+
+Expected benefit:
+
+English translations often require more space than Japanese/Korean/Chinese source text.
+
+Bubble-aware rendering gives the renderer more usable area.
+
+---
+
+# 4.3 — Panel Detection and Reading-Order Reconstruction
+
+Goal:
+
+Improve how text regions are organized and understood on full comic pages.
+
+Future processing hierarchy may become:
+
+```text
+page
+→ panels
+→ speech bubbles / text areas
+→ OCR regions
+→ reading order
+```
+
+Document possible language/layout considerations.
+
+For Japanese manga:
+
+```text
+right → left
+top → bottom
+```
+
+may matter.
+
+For webtoon/manhwa layouts:
+
+```text
+primarily vertical progression
+```
+
+may dominate.
+
+Potential future work:
+
+- panel detection;
+- bubble grouping;
+- text-region grouping;
+- reading-order heuristics;
+- layout graphs;
+- language-aware ordering;
+- using reconstructed order in both overlay and translation feed.
+
+Do NOT define a complex algorithm as final yet.
+
+This milestone is exploratory until tested against real pages.
+
+---
+
+# 4.4 — Chapter / Session Architecture
+
+Goal:
+
+Move from isolated image processing toward chapter-level state.
+
+Current architecture is mostly:
+
+```text
+image
+→ translation
+```
+
+Future architecture should understand:
+
+```text
+chapter/session
+
+├── image 1
+├── image 2
+├── image 3
+├── ...
+└── image N
+```
+
+Document potential chapter-level state such as:
+
+- ordered images;
+- processed/unprocessed state;
+- translation results;
+- source/target languages;
+- image hashes;
+- cache identities;
+- progress;
+- failures;
+- session lifecycle;
+- revisit/reload behavior.
+
+Benefits:
+
+```text
+better chapter navigation
+better progress persistence
+less repeated work
+better cache reuse
+better context handling
+cleaner large-chapter behavior
+```
+
+This milestone should build on, not replace, the existing backend SQLite cache and extension session state.
+
+---
+
+# 4.5 — Advanced Performance Optimization
+
+Phase 3.7 should remove obvious inefficiencies.
+
+Phase 4.5 should address deeper inference/runtime optimization.
+
+Document investigation areas such as:
+
+```text
+OCR preprocessing optimization
+batch translation
+translation batching across OCR regions
+persistent warm models
+CPU/GPU execution options
+model quantization
+ONNX/runtime optimization
+parallel preprocessing
+more efficient Auto language mode
+image preprocessing reuse
+chapter-level scheduling
+```
+
+Important:
+
+Do not commit the project to ONNX, quantization, GPU inference, or another runtime yet.
+
+These are evaluation areas.
+
+Any optimization must be benchmarked before adoption.
+
+Performance documentation should continue comparing:
+
+```text
+cold request
+warm request
+cache hit
+Auto
+explicit language
+```
+
+Preserve the project's local-first nature.
+
+---
+
+# 4.6 — Context-Aware Local Translation
+
+Goal:
+
+Improve dialogue translation quality using limited nearby context.
+
+Current translation is largely region/group based.
+
+Future experiments may consider:
+
+```text
+previous bubble
+current bubble
+next bubble
 ```
 
 or:
 
 ```text
-3.7 IN PROGRESS — overlay ownership bug remains
+previous N regions
+→ current translation
 ```
+
+Potential improvements:
+
+- pronoun resolution;
+- fragmented dialogue;
+- names;
+- repeated terms;
+- honorifics;
+- punctuation;
+- slang;
+- sentence continuation across bubbles;
+- consistent character terminology.
+
+Important constraints:
+
+```text
+local-first
+no mandatory cloud API
+no project-owned paid API
+```
+
+Do not promise specific model changes yet.
+
+Potential local approaches may be investigated in Phase 4.6.
+
+This milestone is about translation QUALITY and context, not about rewriting the rest of the pipeline.
 
 ---
 
-# AJ — REQUIRED COMMANDS
+# 4.7 — Native-Looking Comic Rendering / Text Cleanup
 
-Run at minimum:
+Goal:
+
+Move beyond simply drawing English on top of source text.
+
+Future pipeline could become:
+
+```text
+detect text/bubble
+↓
+remove or mask original text
+↓
+reconstruct background
+↓
+render translated text
+```
+
+Start with simple cases.
+
+Example:
+
+```text
+plain white speech bubble
+→ clear source text area
+→ draw English cleanly
+```
+
+Only later investigate complex backgrounds.
+
+Possible future techniques:
+
+```text
+solid-color cleanup
+local background estimation
+classical inpainting
+optional ML-based inpainting
+```
+
+Do NOT make generative/AI inpainting a requirement.
+
+Do NOT implement any of it now.
+
+Document it as the final major Phase 4 visual-quality milestone.
+
+---
+
+# PART B — PHASE 4 ORDER
+
+Document the intended dependency/order clearly:
+
+```text
+4.1 Smart Typesetting
+        ↓
+4.2 Bubble / Text Area Detection
+        ↓
+4.3 Panel + Reading Order
+        ↓
+4.4 Chapter / Session Architecture
+        ↓
+4.5 Advanced Performance
+        ↓
+4.6 Context-Aware Translation
+        ↓
+4.7 Native-Looking Rendering
+```
+
+However, explain that:
+
+```text
+4.4 / 4.5
+```
+
+may partially overlap earlier milestones if required by real performance findings.
+
+Do not imply every milestone is completely independent.
+
+---
+
+# PART C — DEFINE WHAT "PHASE 4 COMPLETE" MEANS
+
+Add a concrete Phase 4 completion definition.
+
+Phase 4 should be considered complete when the extension can reliably provide an advanced reading experience where:
+
+```text
+comic images are detected
+↓
+translations occur progressively
+↓
+text regions are grouped/order-aware
+↓
+translations use useful surrounding layout
+↓
+English is typeset intelligently
+↓
+chapter state is preserved/reused
+↓
+performance is acceptable on realistic chapters
+↓
+local translation can use limited dialogue context
+↓
+source text can be cleanly replaced or visually suppressed in supported cases
+```
+
+This does NOT mean the product is ready for arbitrary users yet.
+
+That is Phase 5.
+
+---
+
+# PART D — DEFINE PHASE 5
+
+Add:
+
+# Phase 5 — Productization and General Release
+
+Phase 5 means:
+
+```text
+THE PRODUCT IS FUNCTIONALLY DONE
+AND A NORMAL USER CAN INSTALL AND USE IT
+```
+
+This phase is not primarily about adding new research features.
+
+It is about taking the mature Phase 4 system and making it safe, installable, understandable, maintainable, and releasable.
+
+---
+
+# PHASE 5 OBJECTIVE
+
+By the end of Phase 5, a non-developer should NOT need to:
+
+```text
+clone the Git repository
+install Python manually
+run uvicorn manually
+run python -m http.server
+edit source files
+know where Paddle models live
+use DevTools
+understand OCR model internals
+```
+
+The product should behave like a real application.
+
+---
+
+# PROPOSED PHASE 5 MILESTONES
+
+Document a future structure roughly like this.
+
+Do NOT implement it now.
+
+---
+
+# 5.1 — Production Packaging
+
+Goal:
+
+Package the local backend and required runtime cleanly.
+
+Investigate later:
+
+```text
+Windows installer
+self-contained Python runtime or packaged executable
+backend executable
+dependency packaging
+versioned application directory
+uninstall support
+```
+
+Normal users should not manually configure Python environments.
+
+---
+
+# 5.2 — Backend Lifecycle Management
+
+The user should not manually run:
 
 ```powershell
-node --test "tests/extension/*.test.js"
-python -m pytest -q
-python -m compileall backend scripts tests
-git diff --check
+python.exe -m uvicorn backend.main:app
 ```
 
-Also:
+Future product behavior should manage:
 
 ```text
-node --check
+start backend
+stop backend
+restart backend
+detect crash
+check health
 ```
 
-for all modified JS files.
-
-Run the existing benchmark safely without model downloads.
-
----
-
-# AK — DO NOT DO THESE
-
-Do NOT:
+Potential architecture:
 
 ```text
-enable cloud APIs
-enable implicit model downloads
-replace PaddleOCR
-replace MarianMT
-rewrite extension architecture
-rewrite backend
-remove cache
-increase concurrency blindly
-hard-code positional offsets
-use DOM index as result identity
-start Phase 4
-implement image inpainting
-build perfect manga typesetting
+desktop/background companion app
+        ↓
+local backend
+        ↓
+browser extension
 ```
 
----
+Do not choose the final packaging architecture yet.
 
-# AL — EXPECTED FINAL REPORT
-
-Provide a detailed report.
-
-## 1. Root cause of cross-image overlays
-
-Explain exactly why Image A's translation could appear around Image B.
-
-Include the specific old state/DOM relationship responsible.
+Document it as an implementation decision for Phase 5.
 
 ---
 
-## 2. Ownership fix
+# 5.3 — Model Setup / Model Manager
 
-Explain:
+Users need a safe way to obtain required local OCR/translation models.
+
+Future UI should explain:
 
 ```text
-image identity
-result identity
-overlay ownership
-async-generation protection
-cleanup
+Japanese installed
+Chinese installed
+Korean missing
+Traditional Chinese missing
 ```
 
----
+and allow explicit user-triggered setup.
 
-## 3. Performance profile BEFORE
+Important:
 
-Give actual timing numbers for:
+Runtime translation requests must still NOT silently download models.
+
+Instead:
 
 ```text
-cold
-warm
-cache hit
-Auto
+user explicitly selects Install Korean support
+        ↓
+download/install assets
+        ↓
+validate files
+        ↓
+mark Korean ready
 ```
 
-and identify the dominant stage.
+Possible future capabilities:
+
+- model inventory;
+- disk-space estimate;
+- download progress;
+- checksum/integrity verification;
+- repair/reinstall;
+- remove unused models.
 
 ---
 
-## 4. Performance changes
+# 5.4 — First-Run Setup
 
-For every speed optimization explain:
+Design a future first-run experience.
+
+Example:
 
 ```text
-what changed
-why
-measured benefit
-correctness tradeoff
+Welcome
+↓
+Choose languages
+↓
+Install local models
+↓
+Verify backend
+↓
+Install/connect browser extension
+↓
+Test translation
+↓
+Ready
 ```
 
-Do not list speculative improvements as wins.
+No developer terminal required.
 
 ---
 
-## 5. Performance AFTER
+# 5.5 — Production Extension UX
 
-Provide the same measurements.
+Phase 3 extension UI is development/MVP quality.
 
-Show before vs after.
+Phase 5 should finalize:
+
+- popup;
+- settings;
+- errors;
+- accessibility;
+- status;
+- onboarding;
+- feed;
+- overlays;
+- language controls;
+- model-readiness information.
+
+Remove or hide development/debug UI from normal users.
+
+Keep optional developer diagnostics behind a deliberate debug mode if useful.
 
 ---
 
-## 6. Queue changes
+# 5.6 — Browser Distribution
 
-Explain priority behavior.
+Prepare extension for normal installation/distribution.
 
-State whether concurrency remained 1 or changed.
-
-If changed, provide benchmark justification.
-
----
-
-## 7. Request deduplication
-
-Report behavior for:
+Potential future targets:
 
 ```text
-observer repeat
-Alt+Click collision
-same source duplicates
-settings change
-src change
+Chrome Web Store
+Chromium-compatible browsers
+manual signed/unpacked fallback for development
 ```
 
----
+Review:
 
-## 8. Files changed
-
-Every file and purpose.
-
----
-
-## 9. Tests added
-
-Especially include cross-image ownership regression tests.
+- Manifest permissions;
+- CSP;
+- packaging;
+- icons/assets;
+- privacy disclosure;
+- versioning;
+- extension update strategy.
 
 ---
 
-## 10. Exact test results
+# 5.7 — Installer / Application Updates
 
-Report:
+Define product update behavior.
+
+Consider:
 
 ```text
-extension tests:
-pytest:
-compileall:
-node --check:
-git diff --check:
+backend version
+extension version
+model version
+cache schema version
 ```
+
+Plan compatibility rules.
+
+Avoid updates silently corrupting caches or mismatching API contracts.
 
 ---
 
-## 11. Real Chromium verification
+# 5.8 — Security / Privacy Release Audit
 
-Explicit result for:
+Before general release perform a formal audit of:
 
 ```text
-adjacent images
-full 13-image fixture
-responsive image
-narrow image
-duplicate source
-dynamic insertion
-removal
-lazy source replacement
-Auto
-explicit Japanese
-missing Korean
-backend offline
-feed navigation
-resize
+loopback backend exposure
+CORS
+request limits
+extension permissions
+model downloads
+cache contents
+logs
+API keys if optional providers ever exist
+dependency vulnerabilities
+filesystem permissions
+update integrity
 ```
+
+The product should remain local-first by default.
 
 ---
 
-## 12. Performance numbers
+# 5.9 — Compatibility Testing
 
-Give:
+Test on realistic sites and environments.
+
+Possible matrix:
 
 ```text
-cold:
-warm:
-cache:
-same-source reuse:
+Windows 10
+Windows 11
+
+Chrome
+Edge
+other Chromium browsers where feasible
+
+Japanese manga
+Chinese manhua
+Korean manhwa
+webtoon long-strip layouts
+traditional page layouts
+dynamic readers
+lazy-loaded sites
 ```
 
-with units.
+Do not claim support before testing.
 
 ---
 
-## 13. Remaining limitations
+# 5.10 — Release Documentation
+
+Before Phase 5 completion provide:
+
+```text
+installation guide
+first-run guide
+troubleshooting
+model storage information
+privacy explanation
+supported languages
+known limitations
+performance expectations
+uninstall instructions
+developer documentation
+```
+
+---
+
+# PART E — DEFINE WHAT "PHASE 5 COMPLETE" MEANS
+
+This definition is important.
+
+Document clearly that Phase 5 completion means:
+
+```text
+A NORMAL USER CAN USE AUTO COMIC TRANSLATOR
+WITHOUT DEVELOPMENT KNOWLEDGE.
+```
+
+Success criteria should include:
+
+```text
+download/install application
+↓
+guided model setup
+↓
+install extension
+↓
+backend starts automatically
+↓
+open comic page
+↓
+extension detects comic
+↓
+translation works
+↓
+overlay/feed works
+↓
+cache works
+↓
+clear errors when something is unavailable
+↓
+application can be updated/uninstalled normally
+```
+
+No terminal required for ordinary operation.
+
+No manually running Python commands.
+
+No manually locating model directories.
+
+No repository checkout required.
+
+---
+
+# PART F — PROJECT ROADMAP STRUCTURE
+
+Update `docs/ROADMAP.md` so the high-level project now reads approximately:
+
+```text
+Phase 1 — Core OCR + Translation
+[x]
+
+Phase 2 — Comic Processing
+[x]
+
+Phase 2.5 — Backend Hardening
+[x]
+
+Phase 3 — Chromium Extension
+3.1 ...
+3.2 ...
+...
+3.7 ...
+
+Phase 4 — Advanced Reading Quality
+4.1 Smart Typesetting
+4.2 Speech Bubble / Text Area Detection
+4.3 Panel + Reading Order Reconstruction
+4.4 Chapter / Session Architecture
+4.5 Advanced Performance Optimization
+4.6 Context-Aware Local Translation
+4.7 Native-Looking Rendering
+
+Phase 5 — Productization and General Release
+5.1 Production Packaging
+5.2 Backend Lifecycle
+5.3 Model Manager
+5.4 First-Run Setup
+5.5 Production Extension UX
+5.6 Browser Distribution
+5.7 Updates
+5.8 Security / Privacy Audit
+5.9 Compatibility Testing
+5.10 Release Documentation
+```
+
+All future milestones must remain:
+
+```text
+[ ] planned
+```
+
+Do NOT mark Phase 4 or Phase 5 in progress.
+
+---
+
+# PART G — README UPDATE
+
+Update README so someone arriving at the repository can understand the project trajectory.
+
+Keep it concise.
+
+README should explain:
+
+```text
+Phase 3
+builds the functional browser-extension MVP
+
+Phase 4
+focuses on advanced reading quality
+
+Phase 5
+turns the mature project into a distributable product for normal users
+```
+
+Do not dump the entire detailed roadmap into README.
+
+Link to:
+
+```text
+docs/ROADMAP.md
+```
+
+for milestone details.
+
+---
+
+# PART H — TECHNICAL DOCUMENT UPDATE
+
+Update the technical document's roadmap section.
+
+Its old Phase 4 description is too broad.
+
+Replace/expand it so it matches the detailed Phase 4 plan.
+
+Add Phase 5 as the final productization phase.
+
+Keep architecture discussions separate from speculative implementation details.
+
+Do not write future choices as if they have already been implemented.
+
+Use language such as:
+
+```text
+planned
+candidate
+may
+evaluate
+investigate
+```
+
+where the implementation method is not settled.
+
+---
+
+# PART I — HANDOFF UPDATE
+
+Update:
+
+```text
+docs/HANDOFF.md
+```
+
+with the new high-level future roadmap.
+
+Do not turn the handoff into a giant roadmap duplicate.
+
+Include a short section like:
+
+```text
+Future phases
+
+Phase 4:
+Advanced reading quality.
+
+Phase 5:
+Production packaging and general-user release.
+```
+
+Then link to `ROADMAP.md`.
+
+---
+
+# PART J — ARCHITECTURE DOCUMENT
+
+Review:
+
+```text
+docs/architecture.md
+```
+
+If it currently presents the Phase 3 architecture as the final architecture, add a short "future architecture direction" section.
+
+Possible conceptual evolution:
+
+```text
+Phase 3
+
+Browser page
+→ discovery
+→ local API
+→ OCR
+→ translation
+→ overlay/feed
+
+
+Phase 4
+
+Browser page
+→ chapter/session model
+→ image/layout analysis
+→ OCR
+→ reading-order reconstruction
+→ context-aware translation
+→ smart typesetting / cleanup
+
+
+Phase 5
+
+Installed application
+├── backend lifecycle manager
+├── local models
+├── cache
+└── browser extension
+```
+
+Do not lock in technologies that have not been selected.
+
+---
+
+# PART K — KEEP SCOPE REALISTIC
+
+Explicitly document what Phase 4 is NOT.
+
+Phase 4 is not:
+
+```text
+cloud hosting
+comic distribution
+content hosting
+account system
+social platform
+DRM bypass
+automated scraping service
+commercial translation API dependency
+```
+
+The project remains a user-side comic translation tool.
+
+---
+
+# PART L — LOCAL-FIRST PRINCIPLE
+
+Preserve the existing project principle:
+
+```text
+local OCR
+local translation
+local cache
+local image processing
+```
+
+No paid/cloud provider should become mandatory in Phase 4 or Phase 5.
+
+Optional external providers may remain a possible future extension only if explicitly configured by a user.
+
+They are NOT part of the Phase 4 core plan.
+
+---
+
+# PART M — PHASE TRANSITION RULES
+
+Document the intended gates.
+
+## Phase 3 → Phase 4
+
+Do not begin Phase 4 implementation until:
+
+```text
+3.7 reliability work finished
+overlay ownership stable
+lazy queue stable
+feed stable
+real Chromium verification complete
+major Phase 3 regression tests passing
+```
+
+## Phase 4 → Phase 5
+
+Do not begin product packaging until the advanced reader itself is stable.
+
+Phase 4 completion should establish the product's feature/reading-quality foundation.
+
+Phase 5 should then package and release it.
+
+---
+
+# PART N — NO IMPLEMENTATION IN THIS TASK
+
+This is critical.
+
+After documentation edits:
+
+STOP.
+
+Do NOT implement:
+
+```text
+4.1
+4.2
+4.3
+4.4
+4.5
+4.6
+4.7
+5.x
+```
+
+Do not create placeholders/modules just because they appear in the roadmap.
+
+Do not add TODO source files.
+
+Do not add dependencies.
+
+Do not add tests for nonexistent Phase 4 behavior.
+
+This is a planning-only task.
+
+---
+
+# PART O — DOCUMENT QUALITY
+
+Ensure milestone descriptions answer:
+
+```text
+What problem does this milestone solve?
+
+What broad capabilities are planned?
+
+What explicitly remains out of scope?
+
+What milestone should follow it?
+```
+
+Avoid vague descriptions such as:
+
+```text
+Improve AI
+Make translation better
+Optimize everything
+```
+
+Use concrete technical goals without prematurely fixing implementation choices.
+
+---
+
+# PART P — CONSISTENCY CHECK
+
+After editing documentation, search the repository documentation for old roadmap descriptions that contradict the new plan.
 
 Examples:
 
 ```text
-first model load still expensive
-Auto slower than explicit language
-Korean unavailable in pinned 2.x venv
-translation quality
-perfect typesetting
+"Phase 4 is final"
+"Phase 4 is deployment"
+"Phase 4 optional APIs"
+"Phase 5 ..."
 ```
+
+Reconcile documentation where needed.
+
+Do not alter historical test records.
+
+Do not rewrite completed Phase 1–3 milestone history unnecessarily.
 
 ---
 
-## 14. Final status
+# PART Q — FINAL VALIDATION
+
+Because this is documentation only:
+
+Do NOT run expensive inference.
+
+Do NOT start backend.
+
+Do NOT load OCR models.
+
+Run lightweight checks only.
+
+At minimum:
+
+```powershell
+git diff --check
+```
+
+If the repository has a markdown link checker or documentation checker already available, run it.
+
+Do not add a new documentation tool dependency solely for this task.
+
+---
+
+# EXPECTED FINAL REPORT
+
+When done, report:
+
+## 1. Documentation inspected
+
+List the relevant files reviewed.
+
+## 2. Phase 4 plan
+
+Summarize the final documented milestones:
+
+```text
+4.1 Smart Typesetting
+4.2 Bubble/Text Area Detection
+4.3 Panel + Reading Order
+4.4 Chapter/Session Architecture
+4.5 Advanced Performance
+4.6 Context-Aware Translation
+4.7 Native-Looking Rendering
+```
+
+## 3. Phase 5 plan
+
+Summarize the final productization milestones.
+
+## 4. Files changed
+
+List each changed documentation file and why.
+
+## 5. Consistency changes
+
+Mention any old wording corrected to match the new roadmap.
+
+## 6. Validation
+
+Report:
+
+```text
+git diff --check
+```
+
+and any existing documentation checks actually run.
+
+## 7. Confirm no code changes
+
+Explicitly confirm:
+
+```text
+No Phase 4 implementation was started.
+No Phase 5 implementation was started.
+No runtime/dependency/backend/extension behavior was changed.
+```
+
+## 8. Final roadmap
 
 End with:
 
 ```text
-Phase 3.3:
-Phase 3.4:
-Phase 3.5:
-Phase 3.6:
-Phase 3.7:
-
-Ready for Phase 4: YES / NO
+Phase 3 — Functional extension MVP
+Phase 4 — Advanced Reading Quality
+Phase 5 — Productization and General Release
 ```
 
-Do NOT say YES if the adjacent-image overlay bug remains.
+with Phase 4 and Phase 5 remaining planned only.
 
 ---
 
-# MOST IMPORTANT CORRECTNESS INVARIANT
+# FINAL PRODUCT VISION
 
-This must ALWAYS remain true:
-
-```text
-Image A
- ├─ Result A
- ├─ Overlay A
- └─ Feed Entry A
-
-Image B
- ├─ Result B
- ├─ Overlay B
- └─ Feed Entry B
-```
-
-Never:
+The roadmap should communicate this clearly:
 
 ```text
-Result A → Overlay B
-Result B → Image A
+PHASE 3
+"It works as a browser extension."
+
+        ↓
+
+PHASE 4
+"It reads and looks like a genuinely good comic translation experience."
+
+        ↓
+
+PHASE 5
+"Anyone can install it and use it without being a developer."
 ```
 
-DOM ordering may change.
-
-Feed numbering may change.
-
-Async completion order may change.
-
-The ownership relationship must NOT.
-
----
-
-# MOST IMPORTANT PERFORMANCE INVARIANT
-
-Optimize:
-
-```text
-duplicate work
-queue priority
-cache reuse
-image fetching
-DOM overhead
-model reuse
-```
-
-before considering additional inference concurrency.
-
-The objective is:
-
-```text
-user scrolls to image
-        ↓
-that image gets priority
-        ↓
-one request maximum
-        ↓
-existing local models reused
-        ↓
-result reused wherever safe
-        ↓
-overlay appears immediately after response
-```
-
-Profile first.
-
-Measure after.
-
-Do not sacrifice correctness for benchmark numbers.
-
----
-
-# END OF PHASE 3
-
-Phase 3.7 is the LAST Phase 3 milestone.
-
-Do not begin Phase 4 during this task.
-
-Once 3.7 is genuinely stable and manually verified, produce a clean handoff describing what Phase 4 should address next.
+Do not implement any future phase during this task.

@@ -8,16 +8,30 @@ Checkpoint: 2026-10-01
   connection), Phase 3.2 (comic image discovery), and Phase 3.3 (explicit
   Alt+Click translation round trip) are complete and manually verified. See
   [`ROADMAP.md`](ROADMAP.md) for the phase plan.
-- **Phase 3.4 (lazy translation queue) is implemented and covered by automated
-  tests. Manual Chromium verification is still pending.**
-- **Phase 3.5 (on-image overlay renderer) is implemented and covered by
-  automated tests. Manual Chromium verification is still pending.**
-- **Phase 3.6 (translation feed + expanded chapter fixture) is implemented and
-  covered by automated tests. Manual Chromium verification is still pending.**
-- Phase 3.7 (reliability and polish) has not started.
+- **Phase 3.4 (lazy translation queue), 3.5 (overlay renderer), and 3.6
+  (translation feed) are complete.** Each has automated coverage, and the project
+  owner ran the browser checks in `dev/test-site/README.md` with no issues
+  (recorded 2026-10-01).
+- Phase 3.7 (reliability and polish) is planned and not started.
+- Phase 4 (advanced reading quality) and Phase 5 (productization and general
+  release) are **planned only** — see [`ROADMAP.md`](ROADMAP.md). Do not begin
+  either until the Phase 3 → Phase 4 gate in that document is met.
 
-Do not mark 3.4, 3.5, or 3.6 complete until the browser procedure below is
-recorded.
+## Future phases
+
+Phase 4 — advanced reading quality: smart typesetting, speech-bubble/text-area
+detection, panel and reading-order reconstruction, chapter/session state,
+advanced performance work, context-aware local translation, and native-looking
+rendering.
+
+Phase 5 — productization and general release: packaging, backend lifecycle
+management, model manager, first-run setup, production extension UX, browser
+distribution, updates, security audit, compatibility testing, and release
+documentation.
+
+Both are planning entries in [`ROADMAP.md`](ROADMAP.md), which holds the
+milestone detail, completion definitions, and transition rules. No Phase 4 or
+Phase 5 code, module, dependency, or test exists yet.
 
 ## Auto-mode OCR fix (the reported failure)
 
@@ -258,13 +272,17 @@ served on `127.0.0.1:8080`.
   that flag; `ocr_languages` and auto-mode requests work regardless.
 - Overlay typesetting is MVP: text may overflow its original OCR box for
   readability, and there is no bubble detection, inpainting, font matching, or
-  curved text. Translation quality is not evaluated by this phase.
+  curved text. These are planned Phase 4 milestones (4.1 typesetting, 4.2 bubble
+  detection, 4.7 source-text cleanup), not Phase 3 gaps. Translation quality is
+  not evaluated by this phase.
 - The debug card is still present (collapsed) and is development UI.
 
 ## Next action
 
-Run the Phase 3.4, 3.5, and 3.6 checks in
-[`../dev/test-site/README.md`](../dev/test-site/README.md) with the unpacked
-extension reloaded and **Japanese** selected, then record the result and update
-the status in [`../README.md`](../README.md) and [`ROADMAP.md`](ROADMAP.md)
-before starting Phase 3.7.
+Phase 3 is functionally complete (3.1–3.6 verified). The next work item is
+**Phase 3.7 — reliability and polish** (failure handling, settings, accessibility,
+browser compatibility), which also satisfies most of the Phase 3 → Phase 4 gate.
+
+After 3.7, Phase 4 begins at milestone 4.1 (smart typesetting). Phase 4 and
+Phase 5 are documented as planned only in [`ROADMAP.md`](ROADMAP.md) — do not
+start them before the gate conditions there are met.

@@ -90,7 +90,7 @@ Pipeline steps:
 8. Optionally render translated text onto the image.
 9. Store results in cache for repeated reads.
 
-The backend should expose simple endpoints for health checks, single-image processing, batch processing, and settings validation. The refined API can add support for request hashing, cache hits, and API-backed translation providers.
+The backend should expose simple endpoints for health checks, single-image processing, batch processing, and settings validation. The refined API can add support for request hashing, cache hits, and optional API-backed translation providers. Optional external providers are not part of the Phase 4 core plan: the project stays local-first, and no paid or cloud provider becomes mandatory (see [`ROADMAP.md`](ROADMAP.md)).
 
 Example endpoint structure:
 
@@ -202,7 +202,11 @@ Phase 2 should improve comic-specific processing. This includes better preproces
 
 Phase 3 should introduce the Chrome extension. The extension should detect images, communicate with the backend, and render translations as overlays on real chapter pages.
 
-Phase 4 should focus on advanced reading quality. This includes better typesetting, chapter-wide caching, improved layout reconstruction, faster inference, and optional API-backed translation quality improvements.
+Phase 4 should focus on advanced reading quality rather than on adding features. It builds on the stable Phase 3 path (discover image → lazy queue → OCR → translate → result → overlay → feed) and improves how good that experience is. The planned milestones are smart typesetting (adaptive sizing, wrapping, alignment, and bounds handling in the browser DOM), speech-bubble and text-area detection to recover the usable area around an OCR region (investigating classical thresholding, contour, and connected-component methods before any ML detector), panel detection and reading-order reconstruction (including language-aware ordering such as Japanese right-to-left and webtoon vertical progression), a chapter/session model that persists ordered images, progress, and results while reusing the existing SQLite cache, deeper performance work (translation batching, warm models, preprocessing reuse, and evaluated — not adopted — quantization or alternative runtimes), context-aware local translation using limited nearby dialogue, and native-looking rendering that masks source text in simple cases before attempting complex backgrounds. Chapter-wide caching and layout reconstruction, listed as one broad item in earlier drafts of this document, are covered by the chapter architecture and reading-order milestones respectively; API-backed translation quality is not part of the Phase 4 core plan, which stays local-first.
+
+Phase 5 should turn the mature system into a product a normal user can install and operate without development knowledge: production packaging, backend lifecycle management, a model manager that installs and verifies local OCR/translation assets on explicit user action (runtime requests still never download models), first-run setup, a production-grade extension UI with development diagnostics hidden behind a deliberate debug mode, browser-store distribution, versioned updates across backend, extension, models, and cache schema, a security and privacy audit, compatibility testing across Windows and Chromium browsers and comic layouts, and release documentation.
+
+Both phases are planned only. [`ROADMAP.md`](ROADMAP.md) holds the milestone detail, the completion definitions, and the transition rules; this document does not commit to any implementation method that has not been selected and benchmarked.
 
 ## 12. Risks and Limitations
 
@@ -224,4 +228,4 @@ MVP scope:
 - Render browser text overlays.
 - Cache processed image results locally.
 
-This MVP proves the full reading loop while keeping implementation complexity manageable. More advanced features like automatic bubble cleanup, perfect image replacement, and AI typesetting can be added after the basic pipeline is stable.
+This MVP proves the full reading loop while keeping implementation complexity manageable. More advanced reading-quality work — automatic bubble detection and cleanup, image replacement, and smart typesetting — is planned as Phase 4 (milestones 4.2, 4.7, and 4.1 respectively) and is not implemented yet; see [`ROADMAP.md`](ROADMAP.md).
